@@ -16,10 +16,11 @@ Production-grade realtime dashboard built with Next.js App Router + Convex.
   - RSS API-style feeds: BBC, Al Jazeera, NYTimes World, Guardian World
 - Aggregates **Signals**:
   - NASA FIRMS hotspots
-  - OpenSky flight snapshots
+  - OpenSky flight snapshots with ADSB.lol fallback
   - Connectivity adapter with pluggable provider + OONI anomaly telemetry
 - Supports optional **Social feed** adapters (always unverified):
   - Custom social endpoint
+  - X API recent search (`/2/tweets/search/recent`)
   - Reddit JSON API enrichment
   - Mock fallback when enabled but no live social source is available
 - Clusters duplicate reports into unified events
@@ -27,6 +28,7 @@ Production-grade realtime dashboard built with Next.js App Router + Convex.
 - Separates News vs Signals vs Social in UI
 - Stores and evaluates user alert rules with in-app notifications
 - Auto-translates dashboard content to user/browser language with DeepL or LibreTranslate fallback
+- Adds AI-generated situation briefing using Vercel AI SDK endpoint (`/api/analysis`)
 
 ## Safety UX
 - Banner disclaimer shown on dashboard:
@@ -136,7 +138,16 @@ Optional:
 - `SOCIAL_FEED_ENDPOINT`
 - `SOCIAL_FEED_TOKEN`
 - `SOCIAL_REDDIT_ENABLED`
+- `SOCIAL_X_ENABLED`
+- `X_API_BEARER_TOKEN`
+- `X_API_BASE_URL`
+- `X_API_QUERY`
+- `X_API_MAX_RESULTS`
+- `X_API_LANG`
+- `X_API_INCLUDE_REPLIES`
 - `DEEPL_API_KEY`
+- `AI_GATEWAY_API_KEY`
+- `AI_SUMMARY_MODEL`
 
 ### 4) Start Convex dev
 ```bash

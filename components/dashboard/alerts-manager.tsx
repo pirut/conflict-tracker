@@ -31,8 +31,8 @@ export function AlertsManager({ alerts }: AlertsManagerProps) {
   }, [kind, radiusKm, lat, lon, thresholdPct]);
 
   return (
-    <div className="rounded-2xl border border-white/15 bg-slate-900/70 p-3">
-      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Alerts</p>
+    <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Alerts</p>
 
       <form
         className="mt-2 space-y-2"
@@ -65,14 +65,14 @@ export function AlertsManager({ alerts }: AlertsManagerProps) {
         <input
           value={name}
           onChange={(event) => setName(event.target.value)}
-          className="w-full rounded-lg border border-white/20 bg-slate-950/70 px-2 py-1.5 text-xs text-slate-100"
+          className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-900"
           placeholder="Alert name"
         />
 
         <select
           value={kind}
           onChange={(event) => setKind(event.target.value as AlertKind)}
-          className="w-full rounded-lg border border-white/20 bg-slate-950/70 px-2 py-1.5 text-xs text-slate-100"
+          className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-900"
         >
           <option value="strike_proximity">High confidence strike within X km</option>
           <option value="connectivity_drop">Connectivity drop &gt; Y%</option>
@@ -84,7 +84,7 @@ export function AlertsManager({ alerts }: AlertsManagerProps) {
               type="number"
               value={radiusKm}
               onChange={(event) => setRadiusKm(Number(event.target.value))}
-              className="rounded-lg border border-white/20 bg-slate-950/70 px-2 py-1.5 text-xs"
+              className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs"
               placeholder="km"
             />
             <input
@@ -92,7 +92,7 @@ export function AlertsManager({ alerts }: AlertsManagerProps) {
               step="0.01"
               value={lat}
               onChange={(event) => setLat(Number(event.target.value))}
-              className="rounded-lg border border-white/20 bg-slate-950/70 px-2 py-1.5 text-xs"
+              className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs"
               placeholder="lat"
             />
             <input
@@ -100,7 +100,7 @@ export function AlertsManager({ alerts }: AlertsManagerProps) {
               step="0.01"
               value={lon}
               onChange={(event) => setLon(Number(event.target.value))}
-              className="rounded-lg border border-white/20 bg-slate-950/70 px-2 py-1.5 text-xs"
+              className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs"
               placeholder="lon"
             />
           </div>
@@ -109,19 +109,19 @@ export function AlertsManager({ alerts }: AlertsManagerProps) {
             type="number"
             value={thresholdPct}
             onChange={(event) => setThresholdPct(Number(event.target.value))}
-            className="w-full rounded-lg border border-white/20 bg-slate-950/70 px-2 py-1.5 text-xs"
+            className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs"
             placeholder="drop threshold"
           />
         )}
 
-        <p className="rounded-lg border border-white/10 bg-slate-950/60 px-2 py-1 text-[11px] text-slate-400">
+        <p className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-600">
           {summary}
         </p>
 
         <button
           type="submit"
           disabled={saving}
-          className="w-full rounded-lg border border-cyan-300/50 bg-cyan-400/10 px-2 py-1.5 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-400/20 disabled:opacity-60"
+          className="w-full rounded-md border border-slate-900 bg-slate-900 px-2 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-700 disabled:opacity-60"
         >
           {saving ? "Creating..." : "Create Alert"}
         </button>
@@ -131,17 +131,17 @@ export function AlertsManager({ alerts }: AlertsManagerProps) {
         {alerts.map((alert) => (
           <div
             key={alert._id}
-            className="rounded-lg border border-white/10 bg-slate-950/60 p-2 text-xs text-slate-300"
+            className="rounded-md border border-slate-300 bg-white p-2 text-xs text-slate-700"
           >
             <div className="flex items-start justify-between gap-2">
               <div>
-                <p className="font-semibold text-slate-100">{alert.name}</p>
-                <p className="text-[11px] text-slate-400">{alert.kind.replace(/_/g, " ")}</p>
+                <p className="font-semibold text-slate-900">{alert.name}</p>
+                <p className="text-[11px] text-slate-500">{alert.kind.replace(/_/g, " ")}</p>
               </div>
               <button
                 type="button"
                 onClick={() => void deleteAlert({ alertId: alert._id as never })}
-                className="rounded-md border border-rose-300/40 px-2 py-0.5 text-[11px] text-rose-200"
+                className="rounded-md border border-rose-300 px-2 py-0.5 text-[11px] text-rose-700"
               >
                 Delete
               </button>

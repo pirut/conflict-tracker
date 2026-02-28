@@ -37,10 +37,220 @@ type RedditSearchResponse = {
   };
 };
 
+type XRecentSearchResponse = {
+  data?: Array<{
+    id?: string;
+    text?: string;
+    created_at?: string;
+    author_id?: string;
+    lang?: string;
+    public_metrics?: {
+      retweet_count?: number;
+      reply_count?: number;
+      like_count?: number;
+      quote_count?: number;
+      bookmark_count?: number;
+      impression_count?: number;
+    };
+  }>;
+  includes?: {
+    users?: Array<{
+      id?: string;
+      username?: string;
+      name?: string;
+      verified?: boolean;
+      public_metrics?: {
+        followers_count?: number;
+        following_count?: number;
+        tweet_count?: number;
+        listed_count?: number;
+      };
+    }>;
+  };
+  meta?: {
+    result_count?: number;
+    newest_id?: string;
+    oldest_id?: string;
+    next_token?: string;
+  };
+};
+
+type XUser = {
+  id?: string;
+  username?: string;
+  name?: string;
+  verified?: boolean;
+  public_metrics?: {
+    followers_count?: number;
+    following_count?: number;
+    tweet_count?: number;
+    listed_count?: number;
+  };
+};
+
 const REDDIT_QUERIES = [
   "iran tehran isfahan natanz qom tabriz strike explosion missile drone air defense",
   "iran connectivity outage internet shutdown flights disruption",
 ];
+
+function resolveXQuery(): string {
+  const fromEnv = process.env.X_API_QUERY?.trim();
+  if (fromEnv) {
+    return fromEnv;
+  }
+
+  const base =
+    '(iran OR tehran OR isfahan OR natanz OR qom OR tabriz) (strike OR explosion OR missile OR drone OR "air defense" OR refinery OR nuclear OR "military base" OR connectivity OR outage)';
+  const includeReplies = (process.env.X_API_INCLUDE_REPLIES ?? "false") === "true";
+  const lang = process.env.X_API_LANG?.trim().toLowerCase();
+
+  const parts = [base, "-is:retweet"];
+  if (!includeReplies) {
+    parts.push("-is:reply");
+  }
+  if (lang) {
+    parts.push(`lang:${lang}`);
+  }
+
+  return parts.join(" ");
+}
+
+async function fetchXItems(now: number): Promise<{
+  items: NormalizedIngestItem[];
+  warnings: string[];
+}> {
+  const warnings: string[] = [];
+  const token = process.env.X_API_BEARER_TOKEN?.trim();
+
+  if (!token) {
+    return {
+      items: [],
+      warnings: ["X API token missing. Set X_API_BEARER_TOKEN to enable X ingestion."],
+    };
+  }
+
+  const maxResultsRaw = Number(process.env.X_API_MAX_RESULTS ?? 70);
+  const maxResults = Number.isFinite(maxResultsRaw)
+    ? Math.max(10, Math.min(100, Math.round(maxResultsRaw)))
+    : 70;
+
+  const query = resolveXQuery();
+  const baseUrl = (process.env.X_API_BASE_URL ?? "https://api.x.com").replace(/\/+$/, "");
+  const url = new URL(`${baseUrl}/2/tweets/search/recent`);
+  url.searchParams.set("query", query);
+  url.searchParams.set("max_results", String(maxResults));
+  url.searchParams.set("tweet.fields", "created_at,lang,author_id,public_metrics");
+  url.searchParams.set("expansions", "author_id");
+  url.searchParams.set("user.fields", "name,username,verified,public_metrics");
+
+  try {
+    const payload = await fetchJson<XRecentSearchResponse>(url.toString(), {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    const usersById = new Map<string, XUser>();
+    for (const user of payload.includes?.users ?? []) {
+      if (user.id) {
+        usersById.set(user.id, user);
+      }
+    }
+
+    const items: NormalizedIngestItem[] = [];
+
+    for (const post of payload.data ?? []) {
+      const text = post.text?.trim();
+      const postId = post.id?.trim();
+      if (!text || !postId) {
+        continue;
+      }
+
+      if (!isRelevantIranConflictNews(text, text)) {
+        continue;
+      }
+
+      const author = post.author_id ? usersById.get(post.author_id) : undefined;
+      const username = author?.username?.trim();
+      const name = author?.name?.trim();
+      const profileLabel = username ? `@${username}` : name || "unknown";
+      const url = username
+        ? `https://x.com/${username}/status/${postId}`
+        : `https://x.com/i/status/${postId}`;
+
+      const place = derivePlace(text);
+      const category = detectCategoryFromText(text) as EventCategory;
+      const metrics = post.public_metrics ?? {};
+      const publishedTs = parseTimestamp(post.created_at, now);
+      const followers = Number(author?.public_metrics?.followers_count ?? 0);
+      const likes = Number(metrics.like_count ?? 0);
+      const reposts = Number(metrics.retweet_count ?? 0);
+      const replies = Number(metrics.reply_count ?? 0);
+      const verified = Boolean(author?.verified);
+
+      const credibilityWeight = Math.min(0.34, 0.2 + (verified ? 0.06 : 0) + (followers > 50000 ? 0.04 : 0));
+
+      items.push({
+        sourceType: "social",
+        sourceName: `X/${profileLabel}`,
+        url,
+        publishedTs,
+        fetchedTs: now,
+        title: `UNVERIFIED X report: ${text.slice(0, 84)}`,
+        summary: text,
+        category,
+        lat: place.lat,
+        lon: place.lon,
+        placeName: place.placeName,
+        country: "Iran",
+        keywords: extractKeywords(text),
+        credibilityWeight,
+        rawJson: {
+          source: "x",
+          id: postId,
+          lang: post.lang,
+          metrics,
+          author: {
+            id: author?.id,
+            username,
+            name,
+            verified,
+            public_metrics: author?.public_metrics,
+          },
+        },
+        isGeoPrecise: place.isGeoPrecise,
+        whatWeKnow: [
+          "An unverified X post references a possible development.",
+          `Engagement snapshot: ${likes} likes, ${reposts} reposts, ${replies} replies.`,
+          verified ? "Author account is verified." : "Author verification status is unconfirmed.",
+        ],
+        whatWeDontKnow: [
+          "Posts can include rumors, stale media, or context loss.",
+          "Independent corroboration is required before treating as factual.",
+        ],
+      });
+    }
+
+    const deduped = new Map<string, NormalizedIngestItem>();
+    for (const item of items) {
+      const key = item.url ?? `${item.sourceName}:${item.title}:${item.publishedTs}`;
+      if (!deduped.has(key)) {
+        deduped.set(key, item);
+      }
+    }
+
+    return {
+      items: [...deduped.values()].slice(0, 140),
+      warnings,
+    };
+  } catch (error) {
+    warnings.push(`X API fetch failed: ${(error as Error).message}`);
+    return {
+      items: [],
+      warnings,
+    };
+  }
+}
 
 function buildMockSocialItems(now: number): NormalizedIngestItem[] {
   const mockPosts = [
@@ -262,6 +472,13 @@ export async function fetchSocialReports(
     const reddit = await fetchRedditItems(now);
     items.push(...reddit.items);
     warnings.push(...reddit.warnings);
+  }
+
+  const useX = (process.env.SOCIAL_X_ENABLED ?? "false") === "true";
+  if (useX) {
+    const x = await fetchXItems(now);
+    items.push(...x.items);
+    warnings.push(...x.warnings);
   }
 
   if (items.length === 0) {

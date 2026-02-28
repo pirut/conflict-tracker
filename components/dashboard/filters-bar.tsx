@@ -45,7 +45,7 @@ const CATEGORIES = [
 
 export function FiltersBar({ filters, onChange, translateText }: FiltersBarProps) {
   return (
-    <section className="relative z-10 rounded-2xl border border-white/15 bg-slate-950/55 p-4 shadow-glow backdrop-blur-xl">
+    <section className="relative z-10 rounded-lg border border-slate-200 bg-white p-4">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex flex-wrap items-center gap-2">
           {TIME_RANGES.map((range) => (
@@ -53,10 +53,10 @@ export function FiltersBar({ filters, onChange, translateText }: FiltersBarProps
               key={range.value}
               type="button"
               onClick={() => onChange({ ...filters, timeRangeHours: range.value })}
-              className={`rounded-full border px-3 py-1 text-xs font-semibold tracking-wide transition ${
+              className={`rounded-md border px-3 py-1 text-xs font-semibold tracking-wide transition ${
                 filters.timeRangeHours === range.value
-                  ? "border-cyan-300/80 bg-cyan-300/20 text-cyan-100"
-                  : "border-white/20 text-slate-300 hover:border-cyan-200/40 hover:text-cyan-50"
+                  ? "border-slate-900 bg-slate-900 text-white"
+                  : "border-slate-300 bg-white text-slate-700 hover:border-slate-500"
               }`}
             >
               {range.label}
@@ -65,8 +65,8 @@ export function FiltersBar({ filters, onChange, translateText }: FiltersBarProps
         </div>
 
         <div className="grid w-full grid-cols-1 gap-3 md:grid-cols-4 lg:w-auto lg:grid-cols-3 xl:grid-cols-4">
-          <label className="text-xs text-slate-300">
-            <span className="mb-1 block font-semibold uppercase tracking-wider text-slate-400">
+          <label className="text-xs text-slate-700">
+            <span className="mb-1 block font-semibold uppercase tracking-wide text-slate-500">
               {translateText("Confidence")}
             </span>
             <input
@@ -79,17 +79,17 @@ export function FiltersBar({ filters, onChange, translateText }: FiltersBarProps
               }
               className="w-full"
             />
-            <span className="font-mono text-xs text-cyan-200">{filters.minConfidence}+</span>
+            <span className="font-mono text-xs text-slate-700">{filters.minConfidence}+</span>
           </label>
 
-          <label className="text-xs text-slate-300">
-            <span className="mb-1 block font-semibold uppercase tracking-wider text-slate-400">
+          <label className="text-xs text-slate-700">
+            <span className="mb-1 block font-semibold uppercase tracking-wide text-slate-500">
               {translateText("Category")}
             </span>
             <select
               value={filters.category}
               onChange={(event) => onChange({ ...filters, category: event.target.value })}
-              className="w-full rounded-xl border border-white/20 bg-slate-900/70 px-2 py-2 text-sm text-slate-100"
+              className="w-full rounded-md border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900"
             >
               {CATEGORIES.map((category) => (
                 <option key={category} value={category}>
@@ -99,8 +99,8 @@ export function FiltersBar({ filters, onChange, translateText }: FiltersBarProps
             </select>
           </label>
 
-          <div className="text-xs text-slate-300">
-            <span className="mb-1 block font-semibold uppercase tracking-wider text-slate-400">
+          <div className="text-xs text-slate-700">
+            <span className="mb-1 block font-semibold uppercase tracking-wide text-slate-500">
               {translateText("Source Types")}
             </span>
             <div className="flex gap-2">
@@ -121,10 +121,10 @@ export function FiltersBar({ filters, onChange, translateText }: FiltersBarProps
                       },
                     })
                   }
-                  className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                  className={`rounded-md border px-3 py-1 text-xs font-semibold transition ${
                     filters.sourceTypes[key]
-                      ? "border-emerald-300/80 bg-emerald-300/15 text-emerald-100"
-                      : "border-white/20 text-slate-300"
+                      ? "border-slate-900 bg-slate-900 text-white"
+                      : "border-slate-300 bg-white text-slate-700"
                   }`}
                 >
                   {translateText(label)}
@@ -133,17 +133,17 @@ export function FiltersBar({ filters, onChange, translateText }: FiltersBarProps
             </div>
           </div>
 
-          <label className="text-xs text-slate-300">
-            <span className="mb-1 block font-semibold uppercase tracking-wider text-slate-400">
+          <label className="text-xs text-slate-700">
+            <span className="mb-1 block font-semibold uppercase tracking-wide text-slate-500">
               {translateText("Search")}
             </span>
             <div className="relative">
-              <Search className="pointer-events-none absolute left-2 top-2.5 h-4 w-4 text-slate-500" />
+              <Search className="pointer-events-none absolute left-2 top-2.5 h-4 w-4 text-slate-400" />
               <input
                 value={filters.q}
                 onChange={(event) => onChange({ ...filters, q: event.target.value })}
                 placeholder={translateText("keyword or location")}
-                className="w-full rounded-xl border border-white/20 bg-slate-900/70 py-2 pl-8 pr-2 text-sm text-slate-100 placeholder:text-slate-500"
+                className="w-full rounded-md border border-slate-300 bg-white py-2 pl-8 pr-2 text-sm text-slate-900 placeholder:text-slate-400"
               />
             </div>
           </label>

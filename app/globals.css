@@ -1,15 +1,12 @@
 @import "tailwindcss";
 
 :root {
-  --bg: #0a101b;
-  --bg-soft: #121b2a;
-  --panel: rgba(10, 18, 33, 0.84);
-  --line: rgba(143, 166, 204, 0.24);
-  --text: #ecf2ff;
-  --text-dim: #a4b5d9;
-  --accent: #4ecdc4;
-  --danger: #ff6b6b;
-  --warning: #f7b267;
+  --bg: #f5f6f8;
+  --panel: #ffffff;
+  --line: #e2e8f0;
+  --text: #0f172a;
+  --text-dim: #475569;
+  --accent: #0f172a;
 }
 
 @theme inline {
@@ -24,23 +21,8 @@
 body {
   margin: 0;
   color: var(--text);
-  background:
-    radial-gradient(circle at 16% 12%, rgba(78, 205, 196, 0.18), transparent 35%),
-    radial-gradient(circle at 88% 82%, rgba(247, 178, 103, 0.16), transparent 32%),
-    linear-gradient(160deg, #070d19, #0b1424 46%, #0e1627);
+  background: var(--bg);
   min-height: 100vh;
-}
-
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  background-image:
-    linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
-  background-size: 28px 28px;
-  opacity: 0.2;
 }
 
 .leaflet-container {

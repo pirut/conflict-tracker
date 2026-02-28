@@ -9,7 +9,7 @@ const MapCanvas = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="flex h-full items-center justify-center bg-slate-900/80 text-sm text-slate-300">
+      <div className="flex h-full items-center justify-center bg-white text-sm text-slate-500">
         Loading map...
       </div>
     ),
@@ -40,8 +40,8 @@ export function MapPanel({
   labels,
 }: MapPanelProps) {
   return (
-    <section className="relative h-full min-h-[32rem] overflow-hidden rounded-2xl border border-white/15 bg-slate-950/60 shadow-glow backdrop-blur-xl">
-      <div className="absolute left-4 top-4 z-[900] rounded-full border border-white/20 bg-slate-950/85 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-slate-200">
+    <section className="relative h-full min-h-[32rem] overflow-hidden rounded-lg border border-slate-200 bg-white">
+      <div className="absolute left-3 top-3 z-[900] rounded-md border border-slate-300 bg-white px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-700">
         {labels.confidenceMap}
       </div>
       <MapCanvas

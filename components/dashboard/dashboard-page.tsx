@@ -9,6 +9,7 @@ import { useEventTranslation } from "@/lib/i18n/use-event-translation";
 import { normalizeLanguage, useUserLanguage } from "@/lib/i18n/use-language";
 import { uiCopy } from "@/lib/i18n/ui-copy";
 import { AlertRule, DashboardEvent, NotificationItem, SignalRecord } from "@/lib/types";
+import { AIAnalysisPanel } from "./ai-analysis-panel";
 import { EventsTimeline } from "./events-timeline";
 import { FiltersBar, DashboardFilters } from "./filters-bar";
 import { MapPanel } from "./map-panel";
@@ -61,10 +62,7 @@ export function DashboardPage() {
     q: filters.q.trim() ? filters.q.trim() : undefined,
   }) as DashboardEvent[] | undefined;
 
-  const events = useMemo(() => eventsQuery ?? [], [eventsQuery]);
-
   const stats = useQuery(api.events.getStats, {});
-
   const connectivitySignalsQuery = useQuery(api.events.getSignals, {
     type: "connectivity",
   }) as SignalRecord[] | undefined;
@@ -74,12 +72,12 @@ export function DashboardPage() {
   const firmsSignalsQuery = useQuery(api.events.getSignals, {
     type: "firms",
   }) as SignalRecord[] | undefined;
-
   const alertsQuery = useQuery(api.events.getAlerts, {}) as AlertRule[] | undefined;
   const notificationsQuery = useQuery(api.events.getNotifications, {
     unreadOnly: true,
   }) as NotificationItem[] | undefined;
 
+  const events = useMemo(() => eventsQuery ?? [], [eventsQuery]);
   const connectivitySignals = useMemo(
     () => connectivitySignalsQuery ?? [],
     [connectivitySignalsQuery],
@@ -87,10 +85,7 @@ export function DashboardPage() {
   const flightSignals = useMemo(() => flightSignalsQuery ?? [], [flightSignalsQuery]);
   const firmsSignals = useMemo(() => firmsSignalsQuery ?? [], [firmsSignalsQuery]);
   const alerts = useMemo(() => alertsQuery ?? [], [alertsQuery]);
-  const notifications = useMemo(
-    () => notificationsQuery ?? [],
-    [notificationsQuery],
-  );
+  const notifications = useMemo(() => notificationsQuery ?? [], [notificationsQuery]);
 
   const translationSeedTexts = useMemo(() => {
     const texts: string[] = [
@@ -124,7 +119,24 @@ export function DashboardPage() {
       "news",
       "signals",
       "social",
+      "AI Situation Analysis",
+      "Key Developments",
+      "Assessed Risks",
+      "Monitoring Gaps",
+      "Recommended Checks",
+      "Updating...",
+      "Mode",
+      "Analysis error",
+      "Generating AI briefing...",
+      "AI briefing will appear when event data is available.",
+      "Updated",
     ];
+
+    for (const event of events.slice(0, 40)) {
+      texts.push(event.title, event.summary, event.placeName);
+      texts.push(...event.whatWeKnow.slice(0, 3));
+      texts.push(...event.whatWeDontKnow.slice(0, 3));
+    }
 
     for (const signal of connectivitySignals.slice(0, 60)) {
       const region = signal.payload?.region;
@@ -150,10 +162,9 @@ export function DashboardPage() {
     }
 
     return Array.from(new Set(texts.filter(Boolean)));
-  }, [connectivitySignals, flightSignals, firmsSignals, notifications]);
+  }, [events, connectivitySignals, flightSignals, firmsSignals, notifications]);
 
   const { translateText } = useEventTranslation(events, activeLanguage, translationSeedTexts);
-
   const copy = useMemo(
     () => (key: string, fallback: string) => uiCopy(activeLanguage, key, fallback),
     [activeLanguage],
@@ -197,7 +208,6 @@ export function DashboardPage() {
     () => events.filter((event) => event.confidence >= 75).length,
     [events],
   );
-
   const latestEventTs = events[0]?.eventTs;
 
   const selectedEvent = useMemo(
@@ -206,33 +216,33 @@ export function DashboardPage() {
   );
 
   return (
-    <main className="relative min-h-screen p-3 text-slate-100 sm:p-5 lg:p-6">
-      <header className="mb-4 flex flex-col gap-3 rounded-2xl border border-white/20 bg-slate-950/60 p-4 shadow-glow backdrop-blur-xl lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <p className="inline-flex items-center gap-2 rounded-full border border-cyan-300/45 bg-cyan-400/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-cyan-100">
-            <Radar className="h-3.5 w-3.5" /> {copy("dashboardTitle", "Iran Live Situation Dashboard")}
-          </p>
-          <h1 className="mt-2 text-2xl font-extrabold tracking-tight text-white lg:text-3xl">
-            {copy(
-              "dashboardSubtitle",
-              "Confirmed News + Signals + Optional Social Intelligence",
-            )}
-          </h1>
-          <p className="mt-1 text-sm text-slate-300">
-            {translateText("Live clustering, confidence scoring, corroboration-aware event stream.")}
-          </p>
-        </div>
+    <main className="min-h-screen p-3 text-slate-900 sm:p-5 lg:p-6">
+      <header className="mb-4 rounded-lg border border-slate-200 bg-white p-4">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <p className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-slate-700">
+              <Radar className="h-3.5 w-3.5" /> {copy("dashboardTitle", "Iran Live Situation Dashboard")}
+            </p>
+            <h1 className="mt-2 text-xl font-semibold text-slate-900 sm:text-2xl">
+              {copy(
+                "dashboardSubtitle",
+                "Confirmed News + Signals + Optional Social Intelligence",
+              )}
+            </h1>
+            <p className="mt-1 text-sm text-slate-600">
+              {translateText("Live clustering, confidence scoring, corroboration-aware event stream.")}
+            </p>
+          </div>
 
-        <div className="space-y-2">
-          <label className="flex items-center justify-end gap-2 text-xs text-slate-300">
-            <Globe2 className="h-3.5 w-3.5 text-cyan-200" />
-            <span className="uppercase tracking-wider text-slate-400">
+          <label className="flex items-center gap-2 text-xs text-slate-600">
+            <Globe2 className="h-3.5 w-3.5 text-slate-500" />
+            <span className="font-semibold uppercase tracking-wide">
               {copy("language", "Language")}
             </span>
             <select
               value={languagePreference}
               onChange={(event) => setLanguagePreference(event.target.value)}
-              className="rounded-lg border border-white/20 bg-slate-900/80 px-2 py-1 text-xs text-slate-100"
+              className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs text-slate-900"
             >
               <option value="auto">Auto ({userLanguage || "en"})</option>
               <option value="en">English</option>
@@ -243,86 +253,80 @@ export function DashboardPage() {
               <option value="tr">Türkçe</option>
             </select>
           </label>
+        </div>
 
-          <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-          <div className="rounded-xl border border-white/15 bg-slate-900/80 px-3 py-2 text-xs">
-            <p className="uppercase tracking-wider text-slate-500">{copy("events24h", "Events (24h)")}</p>
-            <p className="mt-1 text-lg font-semibold text-slate-100">
+        <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4">
+          <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
+            <p className="uppercase tracking-wide text-slate-500">{copy("events24h", "Events (24h)")}</p>
+            <p className="mt-1 text-lg font-semibold text-slate-900">
               {stats ? shortNumber(stats.totalEvents24h) : "..."}
             </p>
           </div>
-          <div className="rounded-xl border border-emerald-300/25 bg-emerald-500/10 px-3 py-2 text-xs">
-            <p className="uppercase tracking-wider text-emerald-200/80">{translateText("High")}</p>
-            <p className="mt-1 text-lg font-semibold text-emerald-100">
-              {stats?.byLabel?.High ?? "..."}
-            </p>
+          <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs">
+            <p className="uppercase tracking-wide text-slate-500">{translateText("High")}</p>
+            <p className="mt-1 text-lg font-semibold text-slate-900">{stats?.byLabel?.High ?? "..."}</p>
           </div>
-          <div className="rounded-xl border border-amber-300/25 bg-amber-500/10 px-3 py-2 text-xs">
-            <p className="uppercase tracking-wider text-amber-200/80">{translateText("Medium")}</p>
-            <p className="mt-1 text-lg font-semibold text-amber-100">
-              {stats?.byLabel?.Medium ?? "..."}
-            </p>
+          <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs">
+            <p className="uppercase tracking-wide text-slate-500">{translateText("Medium")}</p>
+            <p className="mt-1 text-lg font-semibold text-slate-900">{stats?.byLabel?.Medium ?? "..."}</p>
           </div>
-          <div className="rounded-xl border border-rose-300/25 bg-rose-500/10 px-3 py-2 text-xs">
-            <p className="uppercase tracking-wider text-rose-200/80">{translateText("Low")}</p>
-            <p className="mt-1 text-lg font-semibold text-rose-100">
-              {stats?.byLabel?.Low ?? "..."}
-            </p>
+          <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs">
+            <p className="uppercase tracking-wide text-slate-500">{translateText("Low")}</p>
+            <p className="mt-1 text-lg font-semibold text-slate-900">{stats?.byLabel?.Low ?? "..."}</p>
           </div>
-        </div>
         </div>
       </header>
 
-      <div className="mb-4 rounded-xl border border-amber-300/35 bg-amber-500/10 px-3 py-2 text-xs text-amber-50">
+      <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
         {copy(
           "disclaimer",
           "Signals and social reports may be incomplete or inaccurate. Confidence reflects corroboration, not certainty.",
         )}
       </div>
 
-      <section className="mb-4 grid gap-3 rounded-2xl border border-white/15 bg-slate-950/60 p-4 text-xs text-slate-200 shadow-glow lg:grid-cols-4">
-        <div className="rounded-xl border border-white/10 bg-slate-900/70 p-3">
-          <p className="uppercase tracking-wider text-slate-500">{copy("intelligenceSnapshot", "Intelligence Snapshot")}</p>
-          <p className="mt-1 text-sm font-semibold text-cyan-100">
+      <section className="mb-4 grid gap-3 rounded-lg border border-slate-200 bg-white p-4 text-xs text-slate-700 lg:grid-cols-4">
+        <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+          <p className="uppercase tracking-wide text-slate-500">{copy("intelligenceSnapshot", "Intelligence Snapshot")}</p>
+          <p className="mt-1 text-sm font-semibold text-slate-900">
             {highConfidenceCount} {translateText("high-confidence events in current window")}
           </p>
-          <p className="mt-1 text-slate-400">
+          <p className="mt-1 text-slate-500">
             {translateText("Latest update")}: {latestEventTs ? formatAgo(latestEventTs) : "..."}
           </p>
         </div>
-        <div className="rounded-xl border border-white/10 bg-slate-900/70 p-3">
-          <p className="uppercase tracking-wider text-slate-500">{translateText("Source mix")}</p>
-          <p className="mt-1 text-slate-200">
-            {translateText("News")}: <span className="font-semibold text-cyan-100">{sourceMix.news}</span>
+        <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+          <p className="uppercase tracking-wide text-slate-500">{translateText("Source mix")}</p>
+          <p className="mt-1">
+            {translateText("News")}: <span className="font-semibold text-slate-900">{sourceMix.news}</span>
           </p>
-          <p className="text-slate-200">
-            {translateText("Signals")}: <span className="font-semibold text-amber-100">{sourceMix.signals}</span>
+          <p>
+            {translateText("Signals")}: <span className="font-semibold text-slate-900">{sourceMix.signals}</span>
           </p>
-          <p className="text-slate-200">
-            {translateText("Social")}: <span className="font-semibold text-rose-100">{sourceMix.social}</span>
+          <p>
+            {translateText("Social")}: <span className="font-semibold text-slate-900">{sourceMix.social}</span>
           </p>
         </div>
-        <div className="rounded-xl border border-white/10 bg-slate-900/70 p-3">
-          <p className="uppercase tracking-wider text-slate-500">{copy("topLocations", "Top Locations")}</p>
+        <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+          <p className="uppercase tracking-wide text-slate-500">{copy("topLocations", "Top Locations")}</p>
           {topLocations.length === 0 ? (
-            <p className="mt-1 text-slate-400">...</p>
+            <p className="mt-1 text-slate-500">...</p>
           ) : (
             topLocations.map(([place, count]) => (
-              <p key={place} className="mt-1 text-slate-200">
-                {translateText(place)}: <span className="font-semibold text-slate-100">{count}</span>
+              <p key={place} className="mt-1">
+                {translateText(place)}: <span className="font-semibold text-slate-900">{count}</span>
               </p>
             ))
           )}
         </div>
-        <div className="rounded-xl border border-white/10 bg-slate-900/70 p-3">
-          <p className="uppercase tracking-wider text-slate-500">{copy("topCategories", "Top Categories")}</p>
+        <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+          <p className="uppercase tracking-wide text-slate-500">{copy("topCategories", "Top Categories")}</p>
           {topCategories.length === 0 ? (
-            <p className="mt-1 text-slate-400">...</p>
+            <p className="mt-1 text-slate-500">...</p>
           ) : (
             topCategories.map(([category, count]) => (
-              <p key={category} className="mt-1 text-slate-200">
+              <p key={category} className="mt-1">
                 {translateText(category.replace(/_/g, " "))}:{" "}
-                <span className="font-semibold text-slate-100">{count}</span>
+                <span className="font-semibold text-slate-900">{count}</span>
               </p>
             ))
           )}
@@ -330,6 +334,15 @@ export function DashboardPage() {
       </section>
 
       <FiltersBar filters={filters} onChange={setFilters} translateText={translateText} />
+
+      <AIAnalysisPanel
+        events={events}
+        connectivitySignals={connectivitySignals}
+        flightSignals={flightSignals}
+        firmsSignals={firmsSignals}
+        language={activeLanguage}
+        translateText={translateText}
+      />
 
       <section className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
         <div className="xl:col-span-4">
