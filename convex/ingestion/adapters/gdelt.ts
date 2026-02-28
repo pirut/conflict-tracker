@@ -96,36 +96,27 @@ const RSS_FEEDS: Array<{
 ];
 
 function buildNewsQuery(): string {
-  const locationClause = GLOBAL_US_IRAN_LOCATION_TERMS.map((term) =>
-    term.includes(" ") ? `"${term}"` : term,
-  ).join(" OR ");
+  const sanitizeTerm = (term: string) => term.replace(/"/g, "").trim();
+  const quoteTerm = (term: string) => {
+    const cleaned = sanitizeTerm(term);
+    return cleaned.includes(" ") ? `"${cleaned}"` : cleaned;
+  };
 
-  const conflictClause = [
-    "strike",
-    "airstrike",
-    "attack",
-    "missile",
-    "drone",
-    "retaliation",
-    "explosion",
-    "intercept",
-    "military",
-  ].join(" OR ");
+  // GDELT query parser is sensitive to query length/shape, so keep this compact.
+  const locationTerms = FOCUS_US_IRAN
+    ? ["Iran", "Tehran", "Iraq", "Baghdad", "Syria", "Damascus", "Yemen", "Lebanon", "Red Sea", "Hormuz"]
+    : GLOBAL_US_IRAN_LOCATION_TERMS.slice(0, 8);
+  const conflictTerms = ["strike", "attack", "missile", "drone", "retaliation"];
+
+  const locationClause = locationTerms.map(quoteTerm).join(" OR ");
+  const conflictClause = conflictTerms.map(quoteTerm).join(" OR ");
 
   if (FOCUS_US_IRAN) {
-    const usClause = [
-      '"united states"',
-      '"u.s."',
-      "american",
-      "pentagon",
-      "centcom",
-      '"us military"',
-    ].join(" OR ");
-
-    return [`(${locationClause})`, `(${conflictClause})`, `(${usClause})`].join(" AND ");
+    const usClause = ['"united states"', '"u.s."', "pentagon", "centcom"].join(" OR ");
+    return `(${locationClause}) AND (${conflictClause}) AND (${usClause})`;
   }
 
-  return [`(${locationClause})`, `(${conflictClause})`].join(" AND ");
+  return `(${locationClause}) AND (${conflictClause})`;
 }
 
 function decodeXmlText(input: string | undefined): string | undefined {
@@ -325,44 +316,49 @@ function normalizeNewsCandidate(candidate: NewsCandidate, now: number): Normaliz
 }
 
 async function fetchGdeltCandidates(query: string): Promise<NewsCandidate[]> {
-  const url = new URL("http://api.gdeltproject.org/api/v2/doc/doc");
+  const url = new URL("https://api.gdeltproject.org/api/v2/doc/doc");
   url.searchParams.set("query", query);
   url.searchParams.set("mode", "ArtList");
   url.searchParams.set("format", "json");
   url.searchParams.set("maxrecords", "120");
   url.searchParams.set("sort", "DateDesc");
 
+  const mapArticles = (articles: GdeltArticle[]): NewsCandidate[] =>
+    articles.map((article) => ({
+      sourceName: article.domain ?? "GDELT",
+      title: article.title,
+      summary: article.title,
+      url: article.url ?? article.sourceurl,
+      publishedAt: article.seendate,
+      language: article.language,
+      raw: article as unknown as Record<string, unknown>,
+    }));
+
   try {
-    const response = await fetchJson<GdeltResponse>(url.toString());
-    return (response.articles ?? []).map((article) => ({
-      sourceName: article.domain ?? "GDELT",
-      title: article.title,
-      summary: article.title,
-      url: article.url ?? article.sourceurl,
-      publishedAt: article.seendate,
-      language: article.language,
-      raw: article as unknown as Record<string, unknown>,
-    }));
+    const response = await fetchJson<GdeltResponse>(url.toString(), undefined, 30000);
+    return mapArticles(response.articles ?? []);
   } catch {
-    const proxyUrl = `https://r.jina.ai/http://api.gdeltproject.org/api/v2/doc/doc?${url.searchParams.toString()}`;
-    const text = await fetchText(proxyUrl);
-    const start = text.indexOf("{");
-    const end = text.lastIndexOf("}");
+    const proxyUrl = `https://r.jina.ai/https://api.gdeltproject.org/api/v2/doc/doc?${url.searchParams.toString()}`;
+    try {
+      const text = await fetchText(proxyUrl, undefined, 20000);
+      try {
+        const parsed = JSON.parse(text) as GdeltResponse;
+        return mapArticles(parsed.articles ?? []);
+      } catch {
+        const start = text.indexOf("{");
+        const end = text.lastIndexOf("}");
 
-    if (start === -1 || end === -1 || end <= start) {
-      throw new Error("GDELT fallback response did not contain JSON.");
+        if (start === -1 || end === -1 || end <= start) {
+          return [];
+        }
+
+        const parsed = JSON.parse(text.slice(start, end + 1)) as GdeltResponse;
+        return mapArticles(parsed.articles ?? []);
+      }
+    } catch {
+      // GDELT is optional here; Guardian + RSS still keep the desk populated.
+      return [];
     }
-
-    const parsed = JSON.parse(text.slice(start, end + 1)) as GdeltResponse;
-    return (parsed.articles ?? []).map((article) => ({
-      sourceName: article.domain ?? "GDELT",
-      title: article.title,
-      summary: article.title,
-      url: article.url ?? article.sourceurl,
-      publishedAt: article.seendate,
-      language: article.language,
-      raw: article as unknown as Record<string, unknown>,
-    }));
   }
 }
 

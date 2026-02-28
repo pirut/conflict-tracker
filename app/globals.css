@@ -38,18 +38,6 @@ body {
   position: relative;
 }
 
-.monitor-shell::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  opacity: 0.18;
-  background-image:
-    linear-gradient(transparent 95%, rgba(77, 67, 44, 0.18) 95%),
-    linear-gradient(90deg, transparent 95%, rgba(77, 67, 44, 0.18) 95%);
-  background-size: 32px 32px;
-}
-
 .monitor-card {
   border: 1px solid var(--line);
   border-radius: 16px;

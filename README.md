@@ -101,16 +101,22 @@ npm run build
 
 ### Sync Vercel env vars into Convex
 
-This pulls Vercel `development`, `preview`, and `production` env vars and syncs them to Convex (production values win on key conflicts):
+This pulls Vercel `development`, `preview`, and `production` env vars and syncs them to Convex dev and prod deployments (production values win on key conflicts):
 
 ```bash
 npm run env:sync:vercel-convex
 ```
 
-Optional: pass specific environments:
+Optional: pass specific Vercel environments:
 
 ```bash
 node scripts/sync-vercel-env-to-convex.mjs production
+```
+
+Optional: sync target control (`--dev`, `--prod`, or `--both` default):
+
+```bash
+node scripts/sync-vercel-env-to-convex.mjs --prod
 ```
 
 ### Wipe old data and reingest fresh

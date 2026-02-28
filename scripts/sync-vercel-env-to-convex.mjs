@@ -5,9 +5,29 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const defaultEnvs = ["development", "preview", "production"];
-const requested = process.argv.slice(2).filter(Boolean);
-const envs = requested.length > 0 ? requested : defaultEnvs;
+const defaultVercelEnvs = ["development", "preview", "production"];
+const args = process.argv.slice(2);
+
+const vercelEnvs = [];
+let target = "both";
+
+for (const arg of args) {
+  if (arg === "--dev") {
+    target = "dev";
+    continue;
+  }
+  if (arg === "--prod") {
+    target = "prod";
+    continue;
+  }
+  if (arg === "--both") {
+    target = "both";
+    continue;
+  }
+  vercelEnvs.push(arg);
+}
+
+const envs = vercelEnvs.length > 0 ? vercelEnvs : defaultVercelEnvs;
 
 const tempDir = mkdtempSync(join(tmpdir(), "vercel-convex-sync-"));
 
@@ -71,12 +91,13 @@ function pullVercelEnv(environment, filename) {
   }
 }
 
-function setConvexEnv(key, value) {
+function setConvexEnv(key, value, mode) {
+  const extra = mode === "prod" ? ["--prod"] : [];
   try {
-    run("npx", ["convex", "env", "set", key, value]);
+    run("npx", ["convex", "env", "set", ...extra, key, value]);
   } catch (error) {
     const message = String(error?.stderr || error?.message || error);
-    throw new Error(`Failed setting Convex env ${key}: ${message.slice(0, 500)}`);
+    throw new Error(`Failed setting Convex ${mode} env ${key}: ${message.slice(0, 500)}`);
   }
 }
 
@@ -102,14 +123,23 @@ try {
     process.exit(0);
   }
 
+  const targets =
+    target === "both"
+      ? ["dev", "prod"]
+      : target === "prod"
+        ? ["prod"]
+        : ["dev"];
+
   let synced = 0;
   for (const [key, value] of merged) {
-    setConvexEnv(key, value);
-    synced += 1;
+    for (const mode of targets) {
+      setConvexEnv(key, value, mode);
+      synced += 1;
+    }
   }
 
   console.log(
-    `Synced ${synced} env vars to Convex (${envs.join(" -> ")} precedence).`,
+    `Synced ${synced} values to Convex (${targets.join("+")} targets, ${envs.join(" -> ")} Vercel precedence).`,
   );
 } finally {
   rmSync(tempDir, { recursive: true, force: true });

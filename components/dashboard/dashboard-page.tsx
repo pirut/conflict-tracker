@@ -16,6 +16,7 @@ import { api } from "@/convex/_generated/api";
 import { formatAgo, shortNumber } from "@/lib/format";
 import { DashboardEvent, SignalRecord } from "@/lib/types";
 import { AIAnalysisPanel } from "./ai-analysis-panel";
+import { MapPanel } from "./map-panel";
 
 type MonitorFilters = {
   timeRangeHours: number;
@@ -99,6 +100,7 @@ function numberFromSignal(signal: SignalRecord | undefined, key: string): number
 export function DashboardPage() {
   const [filters, setFilters] = useState<MonitorFilters>(DEFAULT_FILTERS);
   const [tick, setTick] = useState(() => Date.now());
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
 
   useEffect(() => {
     const timer = setInterval(() => setTick(Date.now()), 60_000);
@@ -155,6 +157,10 @@ export function DashboardPage() {
   );
 
   const mostRecentEventTs = prioritizedEvents[0]?.eventTs;
+  const selectedEvent = useMemo(
+    () => prioritizedEvents.find((event) => event._id === selectedEventId) ?? null,
+    [prioritizedEvents, selectedEventId],
+  );
 
   const dominantDomains = useMemo(() => topSourceDomains(prioritizedEvents), [prioritizedEvents]);
 
@@ -395,6 +401,21 @@ export function DashboardPage() {
         </div>
 
         <div className="xl:col-span-5 space-y-4">
+          <MapPanel
+            events={prioritizedEvents}
+            selectedEvent={selectedEvent}
+            onSelectEvent={(event) => setSelectedEventId(event._id)}
+            onCloseDrawer={() => setSelectedEventId(null)}
+            translateText={(text) => text}
+            labels={{
+              confidenceMap: "Conflict Map",
+              eventDetail: "Event Detail",
+              whatWeKnow: "What We Know",
+              whatWeDontKnow: "What We Don't Know",
+              sourceLinks: "Source Links",
+            }}
+          />
+
           <aside className="monitor-card p-4 sm:p-5">
             <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-[#6f6f85]">Signals Board</h2>
 

@@ -309,11 +309,21 @@ function shouldTryNextModel(error: unknown): boolean {
   }
 
   const message = error.message.toLowerCase();
+  if (
+    error.status === 404 &&
+    (message.includes("no endpoints found") ||
+      message.includes("data policy") ||
+      message.includes("free model publication"))
+  ) {
+    return true;
+  }
+
   return (
     message.includes("rate") ||
     message.includes("quota") ||
     message.includes("capacity") ||
-    message.includes("overloaded")
+    message.includes("overloaded") ||
+    message.includes("temporarily unavailable")
   );
 }
 
