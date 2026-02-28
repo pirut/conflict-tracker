@@ -75,8 +75,52 @@ export const TRUSTED_NEWS_DOMAINS = [
   "apnews.com",
   "bbc.com",
   "aljazeera.com",
+  "theguardian.com",
   "ft.com",
   "wsj.com",
   "nytimes.com",
   "guardian.co.uk",
+] as const;
+
+export const IRAN_RELEVANCE_TERMS = [
+  "iran",
+  "iranian",
+  "tehran",
+  "isfahan",
+  "natanz",
+  "qom",
+  "tabriz",
+  "shiraz",
+  "mashhad",
+  "ahvaz",
+  "irgc",
+  "islamic republic",
+] as const;
+
+export const CONFLICT_RELEVANCE_TERMS = [
+  "strike",
+  "explosion",
+  "blast",
+  "air defense",
+  "missile",
+  "drone",
+  "attack",
+  "intercept",
+  "military",
+  "base",
+  "refinery",
+  "nuclear",
+  "uranium",
+  "rocket",
+  "raid",
+] as const;
+
+export const NOISE_TERMS = [
+  "football",
+  "soccer",
+  "movie",
+  "celebrity",
+  "music",
+  "tv",
+  "fashion",
 ] as const;

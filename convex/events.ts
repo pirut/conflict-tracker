@@ -307,7 +307,7 @@ export const getEvents = query({
           .query("sources")
           .withIndex("by_eventId", (q: any) => q.eq("eventId", event._id))
           .order("desc")
-          .take(4);
+          .take(12);
 
         return {
           ...event,

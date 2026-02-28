@@ -7,6 +7,13 @@ import { DashboardEvent } from "@/lib/types";
 type EventDrawerProps = {
   event: DashboardEvent | null;
   onClose: () => void;
+  translateText: (text: string) => string;
+  labels: {
+    eventDetail: string;
+    whatWeKnow: string;
+    whatWeDontKnow: string;
+    sourceLinks: string;
+  };
 };
 
 function confidenceTone(score: number): string {
@@ -15,7 +22,7 @@ function confidenceTone(score: number): string {
   return "text-rose-200";
 }
 
-export function EventDrawer({ event, onClose }: EventDrawerProps) {
+export function EventDrawer({ event, onClose, translateText, labels }: EventDrawerProps) {
   if (!event) {
     return null;
   }
@@ -29,8 +36,8 @@ export function EventDrawer({ event, onClose }: EventDrawerProps) {
     <aside className="absolute right-4 top-4 z-[1000] w-[min(26rem,calc(100%-2rem))] rounded-2xl border border-white/20 bg-slate-950/92 p-4 shadow-glow backdrop-blur-xl">
       <div className="flex items-start justify-between gap-2">
         <div>
-          <p className="text-[10px] uppercase tracking-[0.18em] text-slate-400">Event Detail</p>
-          <h3 className="mt-1 text-sm font-semibold text-slate-50">{event.title}</h3>
+          <p className="text-[10px] uppercase tracking-[0.18em] text-slate-400">{labels.eventDetail}</p>
+          <h3 className="mt-1 text-sm font-semibold text-slate-50">{translateText(event.title)}</h3>
           <p className="mt-1 text-xs text-slate-400">{formatAgo(event.eventTs)}</p>
         </div>
         <button
@@ -44,42 +51,42 @@ export function EventDrawer({ event, onClose }: EventDrawerProps) {
 
       <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-300">
         <div className="rounded-xl border border-white/10 bg-slate-900/70 p-2">
-          <p className="text-[10px] uppercase tracking-wider text-slate-500">Confidence</p>
+          <p className="text-[10px] uppercase tracking-wider text-slate-500">{translateText("Confidence")}</p>
           <p className={`mt-1 text-sm font-semibold ${confidenceTone(event.confidence)}`}>
             {event.confidence.toFixed(0)} ({event.confidenceLabel})
           </p>
         </div>
         <div className="rounded-xl border border-white/10 bg-slate-900/70 p-2">
-          <p className="text-[10px] uppercase tracking-wider text-slate-500">Location</p>
-          <p className="mt-1 text-sm font-semibold text-slate-100">{event.placeName}</p>
+          <p className="text-[10px] uppercase tracking-wider text-slate-500">{translateText("Location")}</p>
+          <p className="mt-1 text-sm font-semibold text-slate-100">{translateText(event.placeName)}</p>
         </div>
       </div>
 
       {socialOnly ? (
         <p className="mt-3 rounded-lg border border-rose-300/30 bg-rose-500/10 px-2 py-1 text-xs font-semibold uppercase tracking-wider text-rose-200">
-          Unverified social-only report
+          {translateText("Unverified social-only report")}
         </p>
       ) : null}
 
-      <p className="mt-3 text-xs leading-relaxed text-slate-300">{event.summary}</p>
+      <p className="mt-3 text-xs leading-relaxed text-slate-300">{translateText(event.summary)}</p>
 
       <div className="mt-3 space-y-2 text-xs text-slate-300">
         <div>
-          <p className="font-semibold uppercase tracking-wider text-slate-500">What We Know</p>
+          <p className="font-semibold uppercase tracking-wider text-slate-500">{labels.whatWeKnow}</p>
           <ul className="mt-1 space-y-1">
             {event.whatWeKnow.map((item) => (
               <li key={item} className="rounded-lg bg-white/5 px-2 py-1">
-                {item}
+                {translateText(item)}
               </li>
             ))}
           </ul>
         </div>
         <div>
-          <p className="font-semibold uppercase tracking-wider text-slate-500">What We Don&apos;t Know</p>
+          <p className="font-semibold uppercase tracking-wider text-slate-500">{labels.whatWeDontKnow}</p>
           <ul className="mt-1 space-y-1">
             {event.whatWeDontKnow.map((item) => (
               <li key={item} className="rounded-lg bg-white/5 px-2 py-1">
-                {item}
+                {translateText(item)}
               </li>
             ))}
           </ul>
@@ -87,13 +94,13 @@ export function EventDrawer({ event, onClose }: EventDrawerProps) {
       </div>
 
       <div className="mt-3 rounded-xl border border-white/10 bg-slate-900/80 p-2 text-xs text-slate-300">
-        <p className="font-semibold uppercase tracking-wider text-slate-500">Time</p>
-        <p className="mt-1">Local: {formatLocal(event.eventTs)}</p>
-        <p>UTC: {formatUtc(event.eventTs)}</p>
+        <p className="font-semibold uppercase tracking-wider text-slate-500">{translateText("Time")}</p>
+        <p className="mt-1">{translateText("Local")}: {formatLocal(event.eventTs)}</p>
+        <p>{translateText("UTC")}: {formatUtc(event.eventTs)}</p>
       </div>
 
       <div className="mt-3 space-y-1 text-xs">
-        <p className="font-semibold uppercase tracking-wider text-slate-500">Source Links</p>
+        <p className="font-semibold uppercase tracking-wider text-slate-500">{labels.sourceLinks}</p>
         {event.sources.map((source) => (
           <a
             key={source._id}
@@ -102,7 +109,8 @@ export function EventDrawer({ event, onClose }: EventDrawerProps) {
             rel="noreferrer"
             className="block rounded-lg border border-white/10 bg-slate-900/70 px-2 py-1 text-cyan-200 transition hover:bg-slate-800"
           >
-            {source.sourceName} {source.sourceType === "social" ? "(UNVERIFIED)" : ""}
+            {translateText(source.sourceName)}{" "}
+            {source.sourceType === "social" ? `(${translateText("UNVERIFIED")})` : ""}
           </a>
         ))}
       </div>

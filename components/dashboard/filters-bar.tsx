@@ -17,6 +17,7 @@ export type DashboardFilters = {
 type FiltersBarProps = {
   filters: DashboardFilters;
   onChange: (next: DashboardFilters) => void;
+  translateText: (text: string) => string;
 };
 
 const TIME_RANGES = [
@@ -42,7 +43,7 @@ const CATEGORIES = [
   "other",
 ];
 
-export function FiltersBar({ filters, onChange }: FiltersBarProps) {
+export function FiltersBar({ filters, onChange, translateText }: FiltersBarProps) {
   return (
     <section className="relative z-10 rounded-2xl border border-white/15 bg-slate-950/55 p-4 shadow-glow backdrop-blur-xl">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -66,7 +67,7 @@ export function FiltersBar({ filters, onChange }: FiltersBarProps) {
         <div className="grid w-full grid-cols-1 gap-3 md:grid-cols-4 lg:w-auto lg:grid-cols-3 xl:grid-cols-4">
           <label className="text-xs text-slate-300">
             <span className="mb-1 block font-semibold uppercase tracking-wider text-slate-400">
-              Confidence
+              {translateText("Confidence")}
             </span>
             <input
               type="range"
@@ -83,7 +84,7 @@ export function FiltersBar({ filters, onChange }: FiltersBarProps) {
 
           <label className="text-xs text-slate-300">
             <span className="mb-1 block font-semibold uppercase tracking-wider text-slate-400">
-              Category
+              {translateText("Category")}
             </span>
             <select
               value={filters.category}
@@ -92,7 +93,7 @@ export function FiltersBar({ filters, onChange }: FiltersBarProps) {
             >
               {CATEGORIES.map((category) => (
                 <option key={category} value={category}>
-                  {category.replace(/_/g, " ")}
+                  {translateText(category.replace(/_/g, " "))}
                 </option>
               ))}
             </select>
@@ -100,7 +101,7 @@ export function FiltersBar({ filters, onChange }: FiltersBarProps) {
 
           <div className="text-xs text-slate-300">
             <span className="mb-1 block font-semibold uppercase tracking-wider text-slate-400">
-              Source Types
+              {translateText("Source Types")}
             </span>
             <div className="flex gap-2">
               {([
@@ -126,7 +127,7 @@ export function FiltersBar({ filters, onChange }: FiltersBarProps) {
                       : "border-white/20 text-slate-300"
                   }`}
                 >
-                  {label}
+                  {translateText(label)}
                 </button>
               ))}
             </div>
@@ -134,14 +135,14 @@ export function FiltersBar({ filters, onChange }: FiltersBarProps) {
 
           <label className="text-xs text-slate-300">
             <span className="mb-1 block font-semibold uppercase tracking-wider text-slate-400">
-              Search
+              {translateText("Search")}
             </span>
             <div className="relative">
               <Search className="pointer-events-none absolute left-2 top-2.5 h-4 w-4 text-slate-500" />
               <input
                 value={filters.q}
                 onChange={(event) => onChange({ ...filters, q: event.target.value })}
-                placeholder="keyword or location"
+                placeholder={translateText("keyword or location")}
                 className="w-full rounded-xl border border-white/20 bg-slate-900/70 py-2 pl-8 pr-2 text-sm text-slate-100 placeholder:text-slate-500"
               />
             </div>

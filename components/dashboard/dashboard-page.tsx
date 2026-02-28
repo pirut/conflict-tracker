@@ -2,9 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "convex/react";
-import { Radar } from "lucide-react";
+import { Globe2, Radar } from "lucide-react";
 import { api } from "@/convex/_generated/api";
-import { shortNumber } from "@/lib/format";
+import { formatAgo, shortNumber } from "@/lib/format";
+import { useEventTranslation } from "@/lib/i18n/use-event-translation";
+import { normalizeLanguage, useUserLanguage } from "@/lib/i18n/use-language";
+import { uiCopy } from "@/lib/i18n/ui-copy";
 import { AlertRule, DashboardEvent, NotificationItem, SignalRecord } from "@/lib/types";
 import { EventsTimeline } from "./events-timeline";
 import { FiltersBar, DashboardFilters } from "./filters-bar";
@@ -27,6 +30,14 @@ export function DashboardPage() {
   const [filters, setFilters] = useState<DashboardFilters>(DEFAULT_FILTERS);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [tick, setTick] = useState(() => Date.now());
+  const userLanguage = useUserLanguage();
+  const [languagePreference, setLanguagePreference] = useState("auto");
+  const activeLanguage = useMemo(() => {
+    if (languagePreference === "auto") {
+      return normalizeLanguage(userLanguage);
+    }
+    return normalizeLanguage(languagePreference);
+  }, [languagePreference, userLanguage]);
 
   useEffect(() => {
     const timer = setInterval(() => setTick(Date.now()), 60_000);
@@ -54,18 +65,140 @@ export function DashboardPage() {
 
   const stats = useQuery(api.events.getStats, {});
 
-  const connectivitySignals =
-    (useQuery(api.events.getSignals, { type: "connectivity" }) as SignalRecord[] | undefined) ?? [];
-  const flightSignals =
-    (useQuery(api.events.getSignals, { type: "flight" }) as SignalRecord[] | undefined) ?? [];
-  const firmsSignals =
-    (useQuery(api.events.getSignals, { type: "firms" }) as SignalRecord[] | undefined) ?? [];
+  const connectivitySignalsQuery = useQuery(api.events.getSignals, {
+    type: "connectivity",
+  }) as SignalRecord[] | undefined;
+  const flightSignalsQuery = useQuery(api.events.getSignals, {
+    type: "flight",
+  }) as SignalRecord[] | undefined;
+  const firmsSignalsQuery = useQuery(api.events.getSignals, {
+    type: "firms",
+  }) as SignalRecord[] | undefined;
 
-  const alerts = (useQuery(api.events.getAlerts, {}) as AlertRule[] | undefined) ?? [];
-  const notifications =
-    (useQuery(api.events.getNotifications, { unreadOnly: true }) as
-      | NotificationItem[]
-      | undefined) ?? [];
+  const alertsQuery = useQuery(api.events.getAlerts, {}) as AlertRule[] | undefined;
+  const notificationsQuery = useQuery(api.events.getNotifications, {
+    unreadOnly: true,
+  }) as NotificationItem[] | undefined;
+
+  const connectivitySignals = useMemo(
+    () => connectivitySignalsQuery ?? [],
+    [connectivitySignalsQuery],
+  );
+  const flightSignals = useMemo(() => flightSignalsQuery ?? [], [flightSignalsQuery]);
+  const firmsSignals = useMemo(() => firmsSignalsQuery ?? [], [firmsSignalsQuery]);
+  const alerts = useMemo(() => alertsQuery ?? [], [alertsQuery]);
+  const notifications = useMemo(
+    () => notificationsQuery ?? [],
+    [notificationsQuery],
+  );
+
+  const translationSeedTexts = useMemo(() => {
+    const texts: string[] = [
+      "event",
+      "events",
+      "Unverified",
+      "UNVERIFIED",
+      "UTC",
+      "Local",
+      "Time",
+      "Confidence",
+      "Location",
+      "Category",
+      "Source Types",
+      "Search",
+      "keyword or location",
+      "Live clustering, confidence scoring, corroboration-aware event stream.",
+      "high-confidence events in current window",
+      "Latest update",
+      "Source mix",
+      "No sudden flight drops detected in this window.",
+      "No hotspot rows yet for selected window.",
+      "No notifications yet.",
+      "Max confidence",
+      "drop",
+      "Show",
+      "Hide",
+      "High",
+      "Medium",
+      "Low",
+      "news",
+      "signals",
+      "social",
+    ];
+
+    for (const signal of connectivitySignals.slice(0, 60)) {
+      const region = signal.payload?.region;
+      const title = signal.payload?.title;
+      const summary = signal.payload?.summary;
+      if (typeof region === "string") texts.push(region);
+      if (typeof title === "string") texts.push(title);
+      if (typeof summary === "string") texts.push(summary);
+    }
+
+    for (const signal of flightSignals.slice(0, 60)) {
+      const city = signal.payload?.city;
+      if (typeof city === "string") texts.push(city);
+    }
+
+    for (const signal of firmsSignals.slice(0, 60)) {
+      const region = signal.payload?.region;
+      if (typeof region === "string") texts.push(region);
+    }
+
+    for (const notification of notifications.slice(0, 100)) {
+      texts.push(notification.message);
+    }
+
+    return Array.from(new Set(texts.filter(Boolean)));
+  }, [connectivitySignals, flightSignals, firmsSignals, notifications]);
+
+  const { translateText } = useEventTranslation(events, activeLanguage, translationSeedTexts);
+
+  const copy = useMemo(
+    () => (key: string, fallback: string) => uiCopy(activeLanguage, key, fallback),
+    [activeLanguage],
+  );
+
+  const sourceMix = useMemo(() => {
+    const mix = {
+      news: 0,
+      signals: 0,
+      social: 0,
+    };
+    for (const event of events) {
+      if (event.sourceTypes.includes("news")) mix.news += 1;
+      if (event.sourceTypes.includes("signals")) mix.signals += 1;
+      if (event.sourceTypes.includes("social")) mix.social += 1;
+    }
+    return mix;
+  }, [events]);
+
+  const topLocations = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const event of events) {
+      counts.set(event.placeName, (counts.get(event.placeName) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 4);
+  }, [events]);
+
+  const topCategories = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const event of events) {
+      counts.set(event.category, (counts.get(event.category) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 4);
+  }, [events]);
+
+  const highConfidenceCount = useMemo(
+    () => events.filter((event) => event.confidence >= 75).length,
+    [events],
+  );
+
+  const latestEventTs = events[0]?.eventTs;
 
   const selectedEvent = useMemo(
     () => events.find((event) => event._id === selectedEventId) ?? null,
@@ -77,49 +210,126 @@ export function DashboardPage() {
       <header className="mb-4 flex flex-col gap-3 rounded-2xl border border-white/20 bg-slate-950/60 p-4 shadow-glow backdrop-blur-xl lg:flex-row lg:items-end lg:justify-between">
         <div>
           <p className="inline-flex items-center gap-2 rounded-full border border-cyan-300/45 bg-cyan-400/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-cyan-100">
-            <Radar className="h-3.5 w-3.5" /> Iran Live Situation Dashboard
+            <Radar className="h-3.5 w-3.5" /> {copy("dashboardTitle", "Iran Live Situation Dashboard")}
           </p>
           <h1 className="mt-2 text-2xl font-extrabold tracking-tight text-white lg:text-3xl">
-            Confirmed News + Signals + Optional Social Intelligence
+            {copy(
+              "dashboardSubtitle",
+              "Confirmed News + Signals + Optional Social Intelligence",
+            )}
           </h1>
           <p className="mt-1 text-sm text-slate-300">
-            Live clustering, confidence scoring, corroboration-aware event stream.
+            {translateText("Live clustering, confidence scoring, corroboration-aware event stream.")}
           </p>
         </div>
 
-        <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+        <div className="space-y-2">
+          <label className="flex items-center justify-end gap-2 text-xs text-slate-300">
+            <Globe2 className="h-3.5 w-3.5 text-cyan-200" />
+            <span className="uppercase tracking-wider text-slate-400">
+              {copy("language", "Language")}
+            </span>
+            <select
+              value={languagePreference}
+              onChange={(event) => setLanguagePreference(event.target.value)}
+              className="rounded-lg border border-white/20 bg-slate-900/80 px-2 py-1 text-xs text-slate-100"
+            >
+              <option value="auto">Auto ({userLanguage || "en"})</option>
+              <option value="en">English</option>
+              <option value="es">Español</option>
+              <option value="fr">Français</option>
+              <option value="ar">العربية</option>
+              <option value="fa">فارسی</option>
+              <option value="tr">Türkçe</option>
+            </select>
+          </label>
+
+          <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
           <div className="rounded-xl border border-white/15 bg-slate-900/80 px-3 py-2 text-xs">
-            <p className="uppercase tracking-wider text-slate-500">Events (24h)</p>
+            <p className="uppercase tracking-wider text-slate-500">{copy("events24h", "Events (24h)")}</p>
             <p className="mt-1 text-lg font-semibold text-slate-100">
               {stats ? shortNumber(stats.totalEvents24h) : "..."}
             </p>
           </div>
           <div className="rounded-xl border border-emerald-300/25 bg-emerald-500/10 px-3 py-2 text-xs">
-            <p className="uppercase tracking-wider text-emerald-200/80">High</p>
+            <p className="uppercase tracking-wider text-emerald-200/80">{translateText("High")}</p>
             <p className="mt-1 text-lg font-semibold text-emerald-100">
               {stats?.byLabel?.High ?? "..."}
             </p>
           </div>
           <div className="rounded-xl border border-amber-300/25 bg-amber-500/10 px-3 py-2 text-xs">
-            <p className="uppercase tracking-wider text-amber-200/80">Medium</p>
+            <p className="uppercase tracking-wider text-amber-200/80">{translateText("Medium")}</p>
             <p className="mt-1 text-lg font-semibold text-amber-100">
               {stats?.byLabel?.Medium ?? "..."}
             </p>
           </div>
           <div className="rounded-xl border border-rose-300/25 bg-rose-500/10 px-3 py-2 text-xs">
-            <p className="uppercase tracking-wider text-rose-200/80">Low</p>
+            <p className="uppercase tracking-wider text-rose-200/80">{translateText("Low")}</p>
             <p className="mt-1 text-lg font-semibold text-rose-100">
               {stats?.byLabel?.Low ?? "..."}
             </p>
           </div>
         </div>
+        </div>
       </header>
 
       <div className="mb-4 rounded-xl border border-amber-300/35 bg-amber-500/10 px-3 py-2 text-xs text-amber-50">
-        Signals and social reports may be incomplete or inaccurate. Confidence reflects corroboration, not certainty.
+        {copy(
+          "disclaimer",
+          "Signals and social reports may be incomplete or inaccurate. Confidence reflects corroboration, not certainty.",
+        )}
       </div>
 
-      <FiltersBar filters={filters} onChange={setFilters} />
+      <section className="mb-4 grid gap-3 rounded-2xl border border-white/15 bg-slate-950/60 p-4 text-xs text-slate-200 shadow-glow lg:grid-cols-4">
+        <div className="rounded-xl border border-white/10 bg-slate-900/70 p-3">
+          <p className="uppercase tracking-wider text-slate-500">{copy("intelligenceSnapshot", "Intelligence Snapshot")}</p>
+          <p className="mt-1 text-sm font-semibold text-cyan-100">
+            {highConfidenceCount} {translateText("high-confidence events in current window")}
+          </p>
+          <p className="mt-1 text-slate-400">
+            {translateText("Latest update")}: {latestEventTs ? formatAgo(latestEventTs) : "..."}
+          </p>
+        </div>
+        <div className="rounded-xl border border-white/10 bg-slate-900/70 p-3">
+          <p className="uppercase tracking-wider text-slate-500">{translateText("Source mix")}</p>
+          <p className="mt-1 text-slate-200">
+            {translateText("News")}: <span className="font-semibold text-cyan-100">{sourceMix.news}</span>
+          </p>
+          <p className="text-slate-200">
+            {translateText("Signals")}: <span className="font-semibold text-amber-100">{sourceMix.signals}</span>
+          </p>
+          <p className="text-slate-200">
+            {translateText("Social")}: <span className="font-semibold text-rose-100">{sourceMix.social}</span>
+          </p>
+        </div>
+        <div className="rounded-xl border border-white/10 bg-slate-900/70 p-3">
+          <p className="uppercase tracking-wider text-slate-500">{copy("topLocations", "Top Locations")}</p>
+          {topLocations.length === 0 ? (
+            <p className="mt-1 text-slate-400">...</p>
+          ) : (
+            topLocations.map(([place, count]) => (
+              <p key={place} className="mt-1 text-slate-200">
+                {translateText(place)}: <span className="font-semibold text-slate-100">{count}</span>
+              </p>
+            ))
+          )}
+        </div>
+        <div className="rounded-xl border border-white/10 bg-slate-900/70 p-3">
+          <p className="uppercase tracking-wider text-slate-500">{copy("topCategories", "Top Categories")}</p>
+          {topCategories.length === 0 ? (
+            <p className="mt-1 text-slate-400">...</p>
+          ) : (
+            topCategories.map(([category, count]) => (
+              <p key={category} className="mt-1 text-slate-200">
+                {translateText(category.replace(/_/g, " "))}:{" "}
+                <span className="font-semibold text-slate-100">{count}</span>
+              </p>
+            ))
+          )}
+        </div>
+      </section>
+
+      <FiltersBar filters={filters} onChange={setFilters} translateText={translateText} />
 
       <section className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
         <div className="xl:col-span-4">
@@ -128,6 +338,14 @@ export function DashboardPage() {
             selectedEvent={selectedEvent}
             onSelectEvent={(event) => setSelectedEventId(event._id)}
             onCloseDrawer={() => setSelectedEventId(null)}
+            translateText={translateText}
+            labels={{
+              confidenceMap: copy("confidenceMap", "Confidence Map"),
+              eventDetail: copy("eventDetail", "Event Detail"),
+              whatWeKnow: copy("whatWeKnow", "What We Know"),
+              whatWeDontKnow: copy("whatWeDontKnow", "What We Don't Know"),
+              sourceLinks: copy("sourceLinks", "Source Links"),
+            }}
           />
         </div>
 
@@ -136,6 +354,14 @@ export function DashboardPage() {
             events={events}
             selectedEventId={selectedEventId}
             onSelect={(event) => setSelectedEventId(event._id)}
+            translateText={translateText}
+            labels={{
+              liveTimeline: copy("liveTimeline", "Live Timeline"),
+              newestFirst: copy("newestFirst", "Newest first"),
+              noEvents: copy("noEvents", "No events match current filters."),
+              whatWeKnow: copy("whatWeKnow", "What we know"),
+              whatWeDontKnow: copy("whatWeDontKnow", "What we don't know"),
+            }}
           />
         </div>
 
@@ -146,6 +372,14 @@ export function DashboardPage() {
             firmsSignals={firmsSignals}
             alerts={alerts}
             notifications={notifications}
+            translateText={translateText}
+            labels={{
+              signals: copy("signals", "Signals"),
+              connectivity24h: copy("connectivity24h", "Connectivity (24h)"),
+              flightAlerts: copy("flightAlerts", "Flight Disruption Alerts"),
+              firmsHotspots: copy("firmsHotspots", "FIRMS Hotspots"),
+              notifications: copy("notifications", "In-app Notifications"),
+            }}
           />
         </div>
       </section>

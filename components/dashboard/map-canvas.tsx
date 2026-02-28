@@ -10,6 +10,7 @@ type MapCanvasProps = {
   events: DashboardEvent[];
   onSelect: (event: DashboardEvent) => void;
   selectedEventId: string | null;
+  translateText: (text: string) => string;
 };
 
 function markerColor(confidence: number): string {
@@ -22,7 +23,7 @@ function markerColor(confidence: number): string {
   return "#ef4444";
 }
 
-export function MapCanvas({ events, onSelect, selectedEventId }: MapCanvasProps) {
+export function MapCanvas({ events, onSelect, selectedEventId, translateText }: MapCanvasProps) {
   const clusters = clusterEvents(events);
 
   return (
@@ -64,10 +65,12 @@ export function MapCanvas({ events, onSelect, selectedEventId }: MapCanvasProps)
             <Tooltip direction="top">
               <div className="space-y-1 text-xs">
                 <p className="font-semibold">
-                  {cluster.count} event{cluster.count > 1 ? "s" : ""}
+                  {cluster.count} {translateText(cluster.count > 1 ? "events" : "event")}
                 </p>
-                <p>{event.placeName}</p>
-                <p>Max confidence: {cluster.maxConfidence.toFixed(0)}</p>
+                <p>{translateText(event.placeName)}</p>
+                <p>
+                  {translateText("Max confidence")}: {cluster.maxConfidence.toFixed(0)}
+                </p>
               </div>
             </Tooltip>
           </CircleMarker>
