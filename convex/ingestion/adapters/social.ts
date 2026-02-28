@@ -17,6 +17,7 @@ type SocialPayload = {
     url?: string;
     publishedAt?: string;
     author?: string;
+    engagement?: number;
   }>;
 };
 
@@ -49,7 +50,6 @@ type XRecentSearchResponse = {
       reply_count?: number;
       like_count?: number;
       quote_count?: number;
-      bookmark_count?: number;
       impression_count?: number;
     };
   }>;
@@ -61,17 +61,8 @@ type XRecentSearchResponse = {
       verified?: boolean;
       public_metrics?: {
         followers_count?: number;
-        following_count?: number;
-        tweet_count?: number;
-        listed_count?: number;
       };
     }>;
-  };
-  meta?: {
-    result_count?: number;
-    newest_id?: string;
-    oldest_id?: string;
-    next_token?: string;
   };
 };
 
@@ -82,16 +73,23 @@ type XUser = {
   verified?: boolean;
   public_metrics?: {
     followers_count?: number;
-    following_count?: number;
-    tweet_count?: number;
-    listed_count?: number;
   };
 };
 
 const REDDIT_QUERIES = [
-  "iran iraq syria yemen lebanon red sea hormuz united states us u.s. pentagon centcom strike explosion missile drone air defense",
-  "tehran baghdad damascus sanaa beirut us attack airstrike retaliation bombardment missile drone military base",
+  "iran united states pentagon centcom strike missile drone retaliation",
+  "iran iraq syria yemen lebanon red sea us military base attack",
 ];
+
+const SOCIAL_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+function withinSocialWindow(ts: number, now: number): boolean {
+  if (!Number.isFinite(ts)) {
+    return false;
+  }
+  const delta = now - ts;
+  return delta >= 0 && delta <= SOCIAL_MAX_AGE_MS;
+}
 
 function resolveXQuery(): string {
   const fromEnv = process.env.X_API_QUERY?.trim();
@@ -100,17 +98,19 @@ function resolveXQuery(): string {
   }
 
   const base = [
-    "(iran OR tehran OR isfahan OR natanz OR qom OR tabriz OR iraq OR baghdad OR erbil OR syria OR damascus OR yemen OR sanaa OR lebanon OR beirut OR red sea OR hormuz OR persian gulf)",
+    "(iran OR tehran OR isfahan OR natanz OR qom OR tabriz OR iraq OR syria OR yemen OR lebanon OR red sea OR hormuz)",
     '("united states" OR "u.s." OR us OR pentagon OR centcom OR "us military" OR american)',
-    '(strike OR airstrike OR explosion OR attack OR missile OR drone OR retaliation OR bombardment OR "air defense" OR "military base")',
+    "(strike OR airstrike OR explosion OR attack OR missile OR drone OR retaliation OR bombardment OR military)",
   ].join(" ");
+
   const includeReplies = (process.env.X_API_INCLUDE_REPLIES ?? "false") === "true";
   const lang = process.env.X_API_LANG?.trim().toLowerCase();
-
   const parts = [base, "-is:retweet"];
+
   if (!includeReplies) {
     parts.push("-is:reply");
   }
+
   if (lang) {
     parts.push(`lang:${lang}`);
   }
@@ -132,10 +132,10 @@ async function fetchXItems(now: number): Promise<{
     };
   }
 
-  const maxResultsRaw = Number(process.env.X_API_MAX_RESULTS ?? 70);
+  const maxResultsRaw = Number(process.env.X_API_MAX_RESULTS ?? 50);
   const maxResults = Number.isFinite(maxResultsRaw)
     ? Math.max(10, Math.min(100, Math.round(maxResultsRaw)))
-    : 70;
+    : 50;
 
   const query = resolveXQuery();
   const baseUrl = (process.env.X_API_BASE_URL ?? "https://api.x.com").replace(/\/+$/, "");
@@ -177,29 +177,38 @@ async function fetchXItems(now: number): Promise<{
       const username = author?.username?.trim();
       const name = author?.name?.trim();
       const profileLabel = username ? `@${username}` : name || "unknown";
-      const url = username
+      const postUrl = username
         ? `https://x.com/${username}/status/${postId}`
         : `https://x.com/i/status/${postId}`;
 
-      const place = derivePlace(text);
-      const category = detectCategoryFromText(text) as EventCategory;
       const metrics = post.public_metrics ?? {};
       const publishedTs = parseTimestamp(post.created_at, now);
+      if (!withinSocialWindow(publishedTs, now)) {
+        continue;
+      }
+
       const followers = Number(author?.public_metrics?.followers_count ?? 0);
       const likes = Number(metrics.like_count ?? 0);
       const reposts = Number(metrics.retweet_count ?? 0);
       const replies = Number(metrics.reply_count ?? 0);
+      const engagement = likes + reposts + replies;
       const verified = Boolean(author?.verified);
 
-      const credibilityWeight = Math.min(0.34, 0.2 + (verified ? 0.06 : 0) + (followers > 50000 ? 0.04 : 0));
+      const passesQualityGate = verified || followers >= 5000 || engagement >= 60;
+      if (!passesQualityGate) {
+        continue;
+      }
+
+      const place = derivePlace(text);
+      const category = detectCategoryFromText(text) as EventCategory;
 
       items.push({
         sourceType: "social",
         sourceName: `X/${profileLabel}`,
-        url,
+        url: postUrl,
         publishedTs,
         fetchedTs: now,
-        title: `UNVERIFIED X report: ${text.slice(0, 84)}`,
+        title: `UNVERIFIED X signal: ${text.slice(0, 90)}`,
         summary: text,
         category,
         lat: place.lat,
@@ -207,7 +216,7 @@ async function fetchXItems(now: number): Promise<{
         placeName: place.placeName,
         country: place.country,
         keywords: extractKeywords(text),
-        credibilityWeight,
+        credibilityWeight: Math.min(0.42, 0.24 + (verified ? 0.08 : 0) + (followers > 20000 ? 0.08 : 0)),
         rawJson: {
           source: "x",
           id: postId,
@@ -218,32 +227,31 @@ async function fetchXItems(now: number): Promise<{
             username,
             name,
             verified,
-            public_metrics: author?.public_metrics,
+            followers,
           },
         },
         isGeoPrecise: place.isGeoPrecise,
         whatWeKnow: [
           "An unverified X post references a possible development.",
           `Engagement snapshot: ${likes} likes, ${reposts} reposts, ${replies} replies.`,
-          verified ? "Author account is verified." : "Author verification status is unconfirmed.",
+          verified ? "Author account is verified." : "Author account is not verified.",
         ],
         whatWeDontKnow: [
-          "Posts can include rumors, stale media, or context loss.",
-          "Independent corroboration is required before treating as factual.",
+          "Social posts can contain rumors, stale media, or missing context.",
+          "Independent corroboration is required before treating this as factual.",
         ],
       });
     }
 
     const deduped = new Map<string, NormalizedIngestItem>();
     for (const item of items) {
-      const key = item.url ?? `${item.sourceName}:${item.title}:${item.publishedTs}`;
-      if (!deduped.has(key)) {
-        deduped.set(key, item);
+      if (!deduped.has(item.url ?? `${item.sourceName}:${item.title}:${item.publishedTs}`)) {
+        deduped.set(item.url ?? `${item.sourceName}:${item.title}:${item.publishedTs}`, item);
       }
     }
 
     return {
-      items: [...deduped.values()].slice(0, 140),
+      items: [...deduped.values()].slice(0, 120),
       warnings,
     };
   } catch (error) {
@@ -255,61 +263,14 @@ async function fetchXItems(now: number): Promise<{
   }
 }
 
-function buildMockSocialItems(now: number): NormalizedIngestItem[] {
-  const mockPosts = [
-    {
-      text: "Unverified posts mention loud blasts near Tehran industrial area.",
-      author: "SocialMock",
-      publishedAt: now - 8 * 60 * 1000,
-    },
-    {
-      text: "Unverified chatter references temporary internet slowdown in Isfahan.",
-      author: "SocialMock",
-      publishedAt: now - 11 * 60 * 1000,
-    },
-    {
-      text: "Unverified claims discuss drone activity near Tabriz outskirts.",
-      author: "SocialMock",
-      publishedAt: now - 14 * 60 * 1000,
-    },
-  ];
-
-  return mockPosts.map((post) => {
-    const place = derivePlace(post.text);
-    const category = detectCategoryFromText(post.text) as EventCategory;
-
-    return {
-      sourceType: "social",
-      sourceName: post.author,
-      url: undefined,
-      publishedTs: post.publishedAt,
-      fetchedTs: now,
-      title: `UNVERIFIED social report: ${post.text.slice(0, 84)}`,
-      summary: post.text,
-      category,
-      lat: place.lat,
-      lon: place.lon,
-      placeName: place.placeName,
-      country: place.country,
-      keywords: extractKeywords(post.text),
-      credibilityWeight: 0.2,
-      rawJson: post as unknown as Record<string, unknown>,
-      isGeoPrecise: place.isGeoPrecise,
-      whatWeKnow: ["An unverified social post references a possible development."],
-      whatWeDontKnow: [
-        "Content is synthetic fallback data, not direct platform ingestion.",
-        "Independent corroboration is required before treating as factual.",
-      ],
-    };
-  });
-}
-
 async function fetchRedditItems(now: number): Promise<{
   items: NormalizedIngestItem[];
   warnings: string[];
 }> {
   const warnings: string[] = [];
   const items: NormalizedIngestItem[] = [];
+  const minScore = Number(process.env.REDDIT_MIN_SCORE ?? 40);
+  const minComments = Number(process.env.REDDIT_MIN_COMMENTS ?? 12);
 
   const runs = await Promise.allSettled(
     REDDIT_QUERIES.map(async (query) => {
@@ -321,7 +282,7 @@ async function fetchRedditItems(now: number): Promise<{
 
       const payload = await fetchJson<RedditSearchResponse>(url.toString(), {
         headers: {
-          "User-Agent": "conflict-tracker/1.0",
+          "User-Agent": "conflict-tracker/2.0",
         },
       });
 
@@ -346,19 +307,33 @@ async function fetchRedditItems(now: number): Promise<{
         continue;
       }
 
-      const place = derivePlace(summaryRaw);
-      const category = detectCategoryFromText(summaryRaw) as EventCategory;
-      const url = post.permalink ? `https://www.reddit.com${post.permalink}` : undefined;
+      const score = Number(post.score ?? 0);
+      const comments = Number(post.num_comments ?? 0);
+      if (score < minScore || comments < minComments) {
+        continue;
+      }
+
       const publishedTs =
         typeof post.created_utc === "number" ? Math.round(post.created_utc * 1000) : now;
+      if (!withinSocialWindow(publishedTs, now)) {
+        continue;
+      }
+
+      const place = derivePlace(summaryRaw);
+      const category = detectCategoryFromText(summaryRaw) as EventCategory;
+      const postUrl = post.permalink ? `https://www.reddit.com${post.permalink}` : undefined;
+
+      if (!postUrl) {
+        continue;
+      }
 
       items.push({
         sourceType: "social",
         sourceName: `Reddit/r/${post.subreddit ?? "all"}`,
-        url,
+        url: postUrl,
         publishedTs,
         fetchedTs: now,
-        title: `UNVERIFIED social report: ${post.title.slice(0, 84)}`,
+        title: `UNVERIFIED Reddit signal: ${post.title.slice(0, 90)}`,
         summary: summaryRaw,
         category,
         lat: place.lat,
@@ -366,23 +341,23 @@ async function fetchRedditItems(now: number): Promise<{
         placeName: place.placeName,
         country: place.country,
         keywords: extractKeywords(summaryRaw),
-        credibilityWeight: 0.24,
+        credibilityWeight: 0.3,
         rawJson: {
           source: "reddit",
           subreddit: post.subreddit,
           author: post.author,
-          score: post.score ?? 0,
-          num_comments: post.num_comments ?? 0,
+          score,
+          num_comments: comments,
           permalink: post.permalink,
         },
         isGeoPrecise: place.isGeoPrecise,
         whatWeKnow: [
-          "An unverified social post references a possible development.",
-          `Engagement snapshot: score ${post.score ?? 0}, comments ${post.num_comments ?? 0}.`,
+          "An unverified Reddit post references a possible development.",
+          `Engagement snapshot: score ${score}, comments ${comments}.`,
         ],
         whatWeDontKnow: [
           "Social posts may contain rumors, misattribution, or recycled footage.",
-          "Independent corroboration is required before treating as factual.",
+          "Independent corroboration is required before treating this as factual.",
         ],
       });
     }
@@ -410,41 +385,55 @@ async function fetchEndpointItems(endpoint: string, now: number): Promise<Normal
         : undefined,
   });
 
-  return (payload.posts ?? [])
-    .map((post) => {
-      const text = post.text?.trim();
-      if (!text) {
-        return null;
-      }
+  const items: NormalizedIngestItem[] = [];
 
-      const place = derivePlace(text);
-      const category = detectCategoryFromText(text) as EventCategory;
+  for (const post of payload.posts ?? []) {
+    const text = post.text?.trim();
+    if (!text || !post.url) {
+      continue;
+    }
 
-      return {
-        sourceType: "social",
-        sourceName: post.author ?? "SocialFeed",
-        url: post.url,
-        publishedTs: parseTimestamp(post.publishedAt, now),
-        fetchedTs: now,
-        title: `Unverified social report: ${text.slice(0, 84)}`,
-        summary: text,
-        category,
-        lat: place.lat,
-        lon: place.lon,
-        placeName: place.placeName,
-        country: place.country,
-        keywords: extractKeywords(text),
-        credibilityWeight: 0.28,
-        rawJson: post as unknown as Record<string, unknown>,
-        isGeoPrecise: place.isGeoPrecise,
-        whatWeKnow: ["A social media post mentions a possible incident."],
-        whatWeDontKnow: [
-          "This report is unverified and may be inaccurate.",
-          "Independent corroboration is required before treating as factual.",
-        ],
-      };
-    })
-    .filter(Boolean) as NormalizedIngestItem[];
+    if (!isRelevantIranConflictNews(text, text)) {
+      continue;
+    }
+
+    const publishedTs = parseTimestamp(post.publishedAt, now);
+    if (!withinSocialWindow(publishedTs, now)) {
+      continue;
+    }
+
+    const place = derivePlace(text);
+    const category = detectCategoryFromText(text) as EventCategory;
+
+    items.push({
+      sourceType: "social",
+      sourceName: post.author ?? "SocialFeed",
+      url: post.url,
+      publishedTs,
+      fetchedTs: now,
+      title: `UNVERIFIED social signal: ${text.slice(0, 90)}`,
+      summary: text,
+      category,
+      lat: place.lat,
+      lon: place.lon,
+      placeName: place.placeName,
+      country: place.country,
+      keywords: extractKeywords(text),
+      credibilityWeight: 0.32,
+      rawJson: {
+        ...post,
+        engagement: Number(post.engagement ?? 0),
+      } as unknown as Record<string, unknown>,
+      isGeoPrecise: place.isGeoPrecise,
+      whatWeKnow: ["An unverified social post references a possible development."],
+      whatWeDontKnow: [
+        "This report is unverified and may be inaccurate.",
+        "Independent corroboration is required before treating this as factual.",
+      ],
+    });
+  }
+
+  return items;
 }
 
 export async function fetchSocialReports(
@@ -461,7 +450,7 @@ export async function fetchSocialReports(
     };
   }
 
-  const endpoint = process.env.SOCIAL_FEED_ENDPOINT;
+  const endpoint = process.env.SOCIAL_FEED_ENDPOINT?.trim();
   if (endpoint) {
     try {
       items.push(...(await fetchEndpointItems(endpoint, now)));
@@ -484,12 +473,21 @@ export async function fetchSocialReports(
     warnings.push(...x.warnings);
   }
 
-  if (items.length === 0) {
-    items.push(...buildMockSocialItems(now));
-    warnings.push(
-      "No social API records available; emitting mock UNVERIFIED social items for pipeline continuity.",
-    );
+  const deduped = new Map<string, NormalizedIngestItem>();
+  for (const item of items) {
+    const key = item.url ?? `${item.sourceName}:${item.title}:${item.publishedTs}`;
+    if (!deduped.has(key)) {
+      deduped.set(key, item);
+    }
   }
 
-  return { items, warnings };
+  const filtered = [...deduped.values()]
+    .sort((a, b) => b.publishedTs - a.publishedTs)
+    .slice(0, 180);
+
+  if (filtered.length === 0) {
+    warnings.push("No social rows passed quality filters; no synthetic fallback is emitted.");
+  }
+
+  return { items: filtered, warnings };
 }

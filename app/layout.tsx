@@ -1,24 +1,24 @@
 import type { Metadata } from "next";
-import { IBM_Plex_Mono, Manrope } from "next/font/google";
+import { IBM_Plex_Mono, Newsreader } from "next/font/google";
 import "./globals.css";
 import { ConvexClientProvider } from "@/providers/convex-provider";
 
-const manrope = Manrope({
-  variable: "--font-manrope",
+const bodyFont = Newsreader({
+  variable: "--font-body",
   subsets: ["latin"],
-  weight: ["400", "500", "600", "700", "800"],
+  weight: ["400", "500", "600", "700"],
 });
 
 const plexMono = IBM_Plex_Mono({
-  variable: "--font-plex-mono",
+  variable: "--font-mono",
   subsets: ["latin"],
   weight: ["400", "500", "600"],
 });
 
 export const metadata: Metadata = {
-  title: "Iran Live Situation Dashboard",
+  title: "US-Iran Conflict Intelligence Desk",
   description:
-    "Realtime event intelligence dashboard combining confirmed news, technical signals, and optional social indicators.",
+    "High-signal conflict monitoring for US-Iran escalation with trusted-source ingestion and AI briefing.",
 };
 
 export default function RootLayout({
@@ -28,7 +28,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${manrope.variable} ${plexMono.variable} antialiased`}>
+      <body className={`${bodyFont.variable} ${plexMono.variable} antialiased`}>
         <ConvexClientProvider>{children}</ConvexClientProvider>
       </body>
     </html>

@@ -9,6 +9,11 @@ import {
 } from "../../constants";
 import { resolvePlaceFromText } from "../../lib/geo";
 
+const MAX_NEWS_AGE_HOURS_RAW = Number(process.env.MAX_NEWS_AGE_HOURS ?? 72);
+const MAX_NEWS_AGE_HOURS = Number.isFinite(MAX_NEWS_AGE_HOURS_RAW)
+  ? Math.max(6, Math.min(7 * 24, Math.round(MAX_NEWS_AGE_HOURS_RAW)))
+  : 72;
+
 export async function fetchJson<T>(
   url: string,
   init?: RequestInit,
@@ -60,23 +65,59 @@ export function parseTimestamp(input: string | number | undefined, fallback: num
   return Number.isNaN(parsed) ? fallback : parsed;
 }
 
+function normalizeText(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+function countMatches(text: string, terms: readonly string[]): string[] {
+  const lowered = text.toLowerCase();
+  return terms.filter((term) => lowered.includes(term));
+}
+
+export function hostnameFromUrl(url?: string): string | null {
+  if (!url) {
+    return null;
+  }
+
+  try {
+    return new URL(url).hostname.replace(/^www\./, "").toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+export function isTrustedNewsUrl(url?: string): boolean {
+  const hostname = hostnameFromUrl(url);
+  if (!hostname) {
+    return false;
+  }
+
+  return TRUSTED_NEWS_DOMAINS.some((trusted) => hostname === trusted || hostname.endsWith(`.${trusted}`));
+}
+
+export function isFreshNewsTimestamp(ts: number, now: number): boolean {
+  if (!Number.isFinite(ts)) {
+    return false;
+  }
+
+  const ageMs = now - ts;
+  if (ageMs < -10 * 60 * 1000) {
+    return false;
+  }
+
+  return ageMs <= MAX_NEWS_AGE_HOURS * 60 * 60 * 1000;
+}
+
 export function extractCredibilityWeight(url?: string): number {
   if (!url) {
-    return 0.55;
+    return 0.52;
   }
 
-  let hostname = "";
-  try {
-    hostname = new URL(url).hostname.replace(/^www\./, "");
-  } catch {
-    return 0.55;
+  if (isTrustedNewsUrl(url)) {
+    return 0.92;
   }
 
-  if (TRUSTED_NEWS_DOMAINS.some((trusted) => hostname.endsWith(trusted))) {
-    return 0.9;
-  }
-
-  return 0.65;
+  return 0.45;
 }
 
 export function derivePlace(text: string): {
@@ -99,40 +140,36 @@ export function detectCategoryFromText(text: string): string {
   return "other";
 }
 
-function normalizeText(text: string): string {
-  return text.replace(/\s+/g, " ").trim();
-}
-
-function countMatches(text: string, terms: readonly string[]): string[] {
-  const lowered = text.toLowerCase();
-  return terms.filter((term) => lowered.includes(term));
-}
-
 export function computeNewsRelevanceScore(text: string): number {
   const normalized = normalizeText(text).toLowerCase();
-  const geoMatches = countMatches(normalized, IRAN_RELEVANCE_TERMS);
+  const iranMatches = countMatches(normalized, IRAN_RELEVANCE_TERMS);
   const conflictMatches = countMatches(normalized, CONFLICT_RELEVANCE_TERMS);
+  const strikeMatches = countMatches(normalized, STRIKE_FOCUS_TERMS);
+  const usMatches = countMatches(normalized, US_RELEVANCE_TERMS);
   const noiseMatches = countMatches(normalized, NOISE_TERMS);
 
   let score = 0;
-  score += geoMatches.length * 18;
-  score += conflictMatches.length * 14;
-  score -= noiseMatches.length * 12;
+  score += iranMatches.length * 20;
+  score += conflictMatches.length * 15;
+  score += strikeMatches.length * 16;
+  score += usMatches.length * 12;
+  score -= noiseMatches.length * 20;
 
-  if (normalized.includes("iran")) {
-    score += 16;
+  if (iranMatches.length > 0 && conflictMatches.length > 0) {
+    score += 18;
   }
-  if (geoMatches.length >= 2) {
-    score += 10;
-  }
-  if (conflictMatches.length >= 2) {
+  if (usMatches.length > 0 && iranMatches.length > 0) {
     score += 12;
   }
-  if (geoMatches.length === 0) {
-    score -= 24;
+  if (strikeMatches.length >= 2) {
+    score += 10;
   }
-  if (conflictMatches.length === 0) {
-    score -= 10;
+
+  if (iranMatches.length === 0) {
+    score -= 38;
+  }
+  if (conflictMatches.length === 0 && strikeMatches.length === 0) {
+    score -= 26;
   }
 
   return Math.max(0, Math.min(100, score));
@@ -145,9 +182,9 @@ export function computeUSIranWarScore(text: string): number {
   const strikeMatches = countMatches(normalized, STRIKE_FOCUS_TERMS);
 
   let score = 0;
-  score += usMatches.length * 22;
-  score += iranMatches.length * 18;
-  score += strikeMatches.length * 16;
+  score += usMatches.length * 24;
+  score += iranMatches.length * 20;
+  score += strikeMatches.length * 18;
 
   if (usMatches.length > 0 && iranMatches.length > 0) {
     score += 14;
@@ -155,15 +192,18 @@ export function computeUSIranWarScore(text: string): number {
   if (usMatches.length > 0 && strikeMatches.length > 0) {
     score += 10;
   }
-  if (strikeMatches.length >= 2) {
-    score += 8;
+  if (iranMatches.length > 0 && strikeMatches.length > 0) {
+    score += 10;
   }
 
   if (usMatches.length === 0) {
-    score -= 22;
+    score -= 20;
+  }
+  if (iranMatches.length === 0) {
+    score -= 28;
   }
   if (strikeMatches.length === 0) {
-    score -= 14;
+    score -= 16;
   }
 
   return Math.max(0, Math.min(100, score));
@@ -173,10 +213,30 @@ export function isRelevantIranConflictNews(
   title: string,
   summary?: string,
 ): boolean {
-  const merged = `${title} ${summary ?? ""}`;
-  const score = computeNewsRelevanceScore(merged);
+  const merged = normalizeText(`${title} ${summary ?? ""}`);
+  if (merged.length < 24) {
+    return false;
+  }
+
+  const lowered = merged.toLowerCase();
+  const hasIranTerm = countMatches(lowered, IRAN_RELEVANCE_TERMS).length > 0;
+  const hasConflictTerm =
+    countMatches(lowered, CONFLICT_RELEVANCE_TERMS).length > 0 ||
+    countMatches(lowered, STRIKE_FOCUS_TERMS).length > 0;
+  const hasUsTerm = countMatches(lowered, US_RELEVANCE_TERMS).length > 0;
+
+  if (!hasIranTerm || !hasConflictTerm) {
+    return false;
+  }
+
+  const relevance = computeNewsRelevanceScore(merged);
   const usIranWarScore = computeUSIranWarScore(merged);
-  return score >= 42 && usIranWarScore >= 34;
+
+  if (hasUsTerm) {
+    return relevance >= 50 && usIranWarScore >= 40;
+  }
+
+  return relevance >= 72;
 }
 
 function extractActors(text: string): string[] {
@@ -244,16 +304,16 @@ export function buildNewsIntelligence(input: {
 
   const whatWeKnow = [
     `${input.sourceName} reported this incident.`,
-    input.baseConfidenceHint ?? "This report passed conflict relevance filtering.",
+    input.baseConfidenceHint ?? "This report passed strict US-Iran conflict relevance filtering.",
     usIranWarScore >= 55
-      ? "Report strongly matches US-Iran strike escalation indicators."
-      : relevanceScore >= 65
-        ? "Content strongly matches Iran conflict indicators."
+      ? "Report strongly matches direct US-Iran confrontation indicators."
+      : relevanceScore >= 70
+        ? "Content strongly matches Iran conflict escalation indicators."
         : "Content has partial conflict relevance indicators.",
   ];
 
   if (isUSLinked) {
-    whatWeKnow.push("US-linked actor terms are explicitly present in this report.");
+    whatWeKnow.push("US-linked actor terms are present in this report.");
   }
 
   if (actors.length > 0) {
@@ -263,17 +323,17 @@ export function buildNewsIntelligence(input: {
     whatWeKnow.push(`Potential impact signals: ${impacts.join(", ")}.`);
   }
   if (input.url) {
-    whatWeKnow.push("Raw source link is available for audit.");
+    whatWeKnow.push("Raw source link is available for verification.");
   }
 
   const whatWeDontKnow = [
     "Independent verification across additional sources may still be pending.",
-    "Ground truth (scale, casualties, and sequence) can change rapidly.",
+    "Ground truth (sequence, casualties, and damage) can shift quickly.",
   ];
 
-  if (relevanceScore < 65) {
+  if (relevanceScore < 72) {
     whatWeDontKnow.push(
-      "This report is relevant but may require stronger corroboration before high-confidence interpretation.",
+      "This item met minimum relevance criteria but still needs corroboration for high-confidence interpretation.",
     );
   }
 

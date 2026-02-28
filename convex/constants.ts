@@ -80,6 +80,15 @@ export const TRUSTED_NEWS_DOMAINS = [
   "wsj.com",
   "nytimes.com",
   "guardian.co.uk",
+  "npr.org",
+  "washingtonpost.com",
+  "bloomberg.com",
+  "abcnews.go.com",
+  "cbsnews.com",
+  "pbs.org",
+  "cnn.com",
+  "timesofisrael.com",
+  "haaretz.com",
 ] as const;
 
 export const IRAN_RELEVANCE_TERMS = [
@@ -101,6 +110,7 @@ export const CONFLICT_RELEVANCE_TERMS = [
   "strike",
   "explosion",
   "blast",
+  "blast(s)",
   "air defense",
   "missile",
   "drone",
@@ -113,6 +123,8 @@ export const CONFLICT_RELEVANCE_TERMS = [
   "uranium",
   "rocket",
   "raid",
+  "retaliation",
+  "escalation",
 ] as const;
 
 export const US_RELEVANCE_TERMS = [
@@ -144,6 +156,7 @@ export const STRIKE_FOCUS_TERMS = [
   "retaliatory",
   "intercepted",
   "salvo",
+  "cross-border fire",
 ] as const;
 
 export const GLOBAL_US_IRAN_LOCATION_TERMS = [
@@ -178,4 +191,7 @@ export const NOISE_TERMS = [
   "music",
   "tv",
   "fashion",
+  "transfer window",
+  "box office",
+  "red carpet",
 ] as const;

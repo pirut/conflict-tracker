@@ -5,13 +5,11 @@ import { extractKeywords } from "../../lib/categorize";
 import { fetchJson } from "./shared";
 import { AdapterContext, IngestionAdapterResult, NormalizedIngestItem } from "../types";
 
-interface ConnectivityProvider {
-  getSamples(now: number): Promise<Array<{ region: string; availabilityPct: number; lat: number; lon: number }>>;
-}
-
 type OoniMeasurement = {
   measurement_start_time?: string;
   test_name?: string;
+  probe_cc?: string;
+  anomaly?: boolean;
   scores?: {
     blocking_general?: number;
   };
@@ -21,29 +19,80 @@ type OoniResponse = {
   results?: OoniMeasurement[];
 };
 
-class MockConnectivityProvider implements ConnectivityProvider {
-  async getSamples(now: number) {
-    const minuteBucket = Math.floor(now / (5 * 60 * 1000));
-    const wave = Math.sin(minuteBucket / 5);
+type CustomConnectivityResponse = {
+  samples?: Array<{
+    region?: string;
+    availabilityPct?: number;
+    lat?: number;
+    lon?: number;
+    observedAt?: string | number;
+    notes?: string;
+  }>;
+};
 
-    return [
-      { region: "Tehran", availabilityPct: Math.max(52, 91 + wave * 6), lat: 35.6892, lon: 51.389 },
-      { region: "Isfahan", availabilityPct: Math.max(50, 88 + wave * 7), lat: 32.6546, lon: 51.668 },
-      { region: "Shiraz", availabilityPct: Math.max(50, 90 + wave * 5), lat: 29.5918, lon: 52.5837 },
-      { region: "Mashhad", availabilityPct: Math.max(48, 86 + wave * 8), lat: 36.2605, lon: 59.6168 },
-      { region: "Tabriz", availabilityPct: Math.max(46, 85 + wave * 9), lat: 38.0962, lon: 46.2738 },
-    ];
+async function fetchCustomConnectivity(
+  endpoint: string,
+  now: number,
+): Promise<NormalizedIngestItem[]> {
+  const payload = await fetchJson<CustomConnectivityResponse>(endpoint, {
+    headers:
+      process.env.CONNECTIVITY_FEED_TOKEN
+        ? { Authorization: `Bearer ${process.env.CONNECTIVITY_FEED_TOKEN}` }
+        : undefined,
+  });
+
+  const rows = payload.samples ?? [];
+
+  const items: NormalizedIngestItem[] = [];
+
+  for (const row of rows) {
+    const availabilityPct = Number(row.availabilityPct ?? NaN);
+    const lat = Number(row.lat ?? NaN);
+    const lon = Number(row.lon ?? NaN);
+    if (!Number.isFinite(availabilityPct) || !Number.isFinite(lat) || !Number.isFinite(lon)) {
+      continue;
+    }
+
+    const region = row.region?.trim() || "Iran";
+    const publishedTs =
+      typeof row.observedAt === "number" ? row.observedAt : Date.parse(row.observedAt ?? "");
+    const ts = Number.isFinite(publishedTs) ? Number(publishedTs) : now;
+    const summary = `Observed connectivity availability in ${region}: ${availabilityPct.toFixed(1)}%.`;
+
+    items.push({
+      sourceType: "signals",
+      sourceName: "ConnectivityFeed",
+      url: endpoint,
+      publishedTs: ts,
+      fetchedTs: now,
+      title: `Connectivity in ${region}`,
+      summary,
+      category: "connectivity",
+      lat,
+      lon,
+      placeName: region,
+      country: "Iran",
+      keywords: extractKeywords(summary),
+      credibilityWeight: 0.72,
+      rawJson: {
+        ...row,
+        provider: "custom_feed",
+        availabilityPct,
+      },
+      isGeoPrecise: true,
+      signalType: "connectivity",
+      whatWeKnow: [
+        `Observed availability: ${availabilityPct.toFixed(1)}%.`,
+        "Data came from a configured external connectivity feed.",
+      ],
+      whatWeDontKnow: [
+        "Regional values can hide neighborhood-level disruption.",
+        "Methodology varies by provider and collection footprint.",
+      ],
+    });
   }
-}
 
-function resolveProvider(): ConnectivityProvider {
-  const provider = process.env.CONNECTIVITY_PROVIDER ?? "mock";
-
-  switch (provider) {
-    case "mock":
-    default:
-      return new MockConnectivityProvider();
-  }
+  return items.slice(0, 80);
 }
 
 async function fetchOoniConnectivitySummary(now: number): Promise<{
@@ -55,11 +104,11 @@ async function fetchOoniConnectivitySummary(now: number): Promise<{
   const url = new URL("https://api.ooni.io/api/v1/measurements");
   url.searchParams.set("probe_cc", "IR");
   url.searchParams.set("anomaly", "true");
-  url.searchParams.set("limit", "30");
+  url.searchParams.set("limit", "80");
 
   const payload = await fetchJson<OoniResponse>(url.toString(), {
     headers: {
-      "User-Agent": "conflict-tracker/1.0",
+      "User-Agent": "conflict-tracker/2.0",
     },
   });
 
@@ -75,6 +124,7 @@ async function fetchOoniConnectivitySummary(now: number): Promise<{
   for (const measurement of recent) {
     const testName = measurement.test_name ?? "unknown_test";
     testCounts.set(testName, (testCounts.get(testName) ?? 0) + 1);
+
     const parsedTs = Date.parse(measurement.measurement_start_time ?? "");
     if (Number.isFinite(parsedTs) && parsedTs > latestMeasurementTs) {
       latestMeasurementTs = parsedTs;
@@ -87,7 +137,7 @@ async function fetchOoniConnectivitySummary(now: number): Promise<{
     .map(([testName, count]) => `${testName} (${count})`);
 
   const anomalyCount = recent.length;
-  const availabilityPct = Math.max(30, 100 - Math.min(70, anomalyCount * 1.8));
+  const availabilityPct = Math.max(20, 100 - Math.min(80, anomalyCount * 2.1));
 
   return {
     anomalyCount,
@@ -101,97 +151,66 @@ export async function fetchConnectivitySignals(
   context: AdapterContext,
 ): Promise<IngestionAdapterResult> {
   const now = context.now;
-  const provider = resolveProvider();
   const warnings: string[] = [];
+  const items: NormalizedIngestItem[] = [];
 
-  try {
-    const samples = await provider.getSamples(now);
+  const customEndpoint = process.env.CONNECTIVITY_FEED_ENDPOINT?.trim();
+  if (customEndpoint) {
+    try {
+      items.push(...(await fetchCustomConnectivity(customEndpoint, now)));
+    } catch (error) {
+      warnings.push(`Connectivity feed fetch failed: ${(error as Error).message}`);
+    }
+  }
 
-    const items: NormalizedIngestItem[] = samples.map((sample) => {
-      const summary = `Estimated connectivity availability in ${sample.region}: ${sample.availabilityPct.toFixed(1)}%.`;
-      const dropDetected = sample.availabilityPct < 80;
+  if ((process.env.CONNECTIVITY_INCLUDE_OONI ?? "true") === "true") {
+    try {
+      const ooni = await fetchOoniConnectivitySummary(now);
+      const summary =
+        ooni.topTests.length > 0
+          ? `OONI observed ${ooni.anomalyCount} anomalous Iran connectivity measurements in the last 6h. Top impacted tests: ${ooni.topTests.join(", ")}.`
+          : `OONI observed ${ooni.anomalyCount} anomalous Iran connectivity measurements in the last 6h.`;
 
-      return {
+      items.push({
         sourceType: "signals",
-        sourceName: "ConnectivityMock",
-        url: undefined,
-        publishedTs: now,
+        sourceName: "OONI",
+        url: "https://api.ooni.io/",
+        publishedTs: ooni.latestMeasurementTs,
         fetchedTs: now,
-        title: `Connectivity in ${sample.region}`,
+        title: "Iran national connectivity anomaly monitor",
         summary,
         category: "connectivity",
-        lat: sample.lat,
-        lon: sample.lon,
-        placeName: sample.region,
+        lat: IRAN_DEFAULT_CENTER.lat,
+        lon: IRAN_DEFAULT_CENTER.lon,
+        placeName: "Iran (national)",
         country: "Iran",
         keywords: extractKeywords(summary),
-        credibilityWeight: 0.52,
+        credibilityWeight: 0.8,
         rawJson: {
-          ...sample,
-          provider: process.env.CONNECTIVITY_PROVIDER ?? "mock",
-          dropDetected,
+          provider: "ooni",
+          anomalyCount: ooni.anomalyCount,
+          topTests: ooni.topTests,
+          availabilityPct: ooni.availabilityPct,
         },
-        isGeoPrecise: true,
+        isGeoPrecise: false,
         signalType: "connectivity",
         whatWeKnow: [
-          `Sampled availability estimate: ${sample.availabilityPct.toFixed(1)}%.`,
-          "Signal is from a pluggable connectivity adapter.",
+          `Recent anomaly count in last 6h: ${ooni.anomalyCount}.`,
+          "Data is sourced from OONI public measurement APIs.",
         ],
         whatWeDontKnow: [
-          "Mock provider values are synthetic unless replaced by a real API adapter.",
-          "Regional estimates can mask neighborhood-level disruptions.",
+          "Anomalies can indicate interference, routing issues, or partial outages.",
+          "Probe coverage and test distribution affect observed intensity.",
         ],
-      };
-    });
-
-    if ((process.env.CONNECTIVITY_INCLUDE_OONI ?? "true") === "true") {
-      try {
-        const ooni = await fetchOoniConnectivitySummary(now);
-        const summary =
-          ooni.topTests.length > 0
-            ? `OONI observed ${ooni.anomalyCount} anomalous connectivity measurements in Iran over the last 6h. Top impacted tests: ${ooni.topTests.join(", ")}.`
-            : `OONI observed ${ooni.anomalyCount} anomalous connectivity measurements in Iran over the last 6h.`;
-
-        items.push({
-          sourceType: "signals",
-          sourceName: "OONI",
-          url: "https://api.ooni.io/",
-          publishedTs: ooni.latestMeasurementTs,
-          fetchedTs: now,
-          title: "National connectivity anomaly monitor",
-          summary,
-          category: "connectivity",
-          lat: IRAN_DEFAULT_CENTER.lat,
-          lon: IRAN_DEFAULT_CENTER.lon,
-          placeName: "Iran (national)",
-          country: "Iran",
-          keywords: extractKeywords(summary),
-          credibilityWeight: 0.74,
-          rawJson: {
-            provider: "ooni",
-            anomalyCount: ooni.anomalyCount,
-            topTests: ooni.topTests,
-            availabilityPct: ooni.availabilityPct,
-          },
-          isGeoPrecise: false,
-          signalType: "connectivity",
-          whatWeKnow: [
-            `Recent anomaly count in last 6h: ${ooni.anomalyCount}.`,
-            "Data is sourced from OONI public measurement APIs.",
-          ],
-          whatWeDontKnow: [
-            "Anomalies indicate potential network interference but not always complete outages.",
-            "Probe distribution and test coverage can affect measured intensity.",
-          ],
-        });
-      } catch (error) {
-        warnings.push(`OONI connectivity fetch failed: ${(error as Error).message}`);
-      }
+      });
+    } catch (error) {
+      warnings.push(`OONI connectivity fetch failed: ${(error as Error).message}`);
     }
-
-    return { items, warnings };
-  } catch (error) {
-    warnings.push(`Connectivity provider failed: ${(error as Error).message}`);
-    return { items: [], warnings };
   }
+
+  if (items.length === 0) {
+    warnings.push("No connectivity rows were accepted (all providers unavailable or disabled).");
+  }
+
+  return { items, warnings };
 }

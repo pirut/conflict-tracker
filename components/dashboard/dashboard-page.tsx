@@ -2,442 +2,479 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "convex/react";
-import { Globe2, Radar } from "lucide-react";
+import {
+  AlertTriangle,
+  Gauge,
+  Globe,
+  Radar,
+  Radio,
+  RefreshCcw,
+  ShieldAlert,
+  Signal,
+} from "lucide-react";
 import { api } from "@/convex/_generated/api";
 import { formatAgo, shortNumber } from "@/lib/format";
-import { useEventTranslation } from "@/lib/i18n/use-event-translation";
-import { normalizeLanguage, useUserLanguage } from "@/lib/i18n/use-language";
-import { uiCopy } from "@/lib/i18n/ui-copy";
-import { AlertRule, DashboardEvent, NotificationItem, SignalRecord } from "@/lib/types";
+import { DashboardEvent, SignalRecord } from "@/lib/types";
 import { AIAnalysisPanel } from "./ai-analysis-panel";
-import { EventsTimeline } from "./events-timeline";
-import { FiltersBar, DashboardFilters } from "./filters-bar";
-import { MapPanel } from "./map-panel";
-import { SignalsPanel } from "./signals-panel";
 
-const DEFAULT_FILTERS: DashboardFilters = {
-  timeRangeHours: 24,
-  minConfidence: 35,
-  category: "all",
-  q: "",
-  sourceTypes: {
-    news: true,
-    signals: true,
-    social: true,
-  },
+type MonitorFilters = {
+  timeRangeHours: number;
+  minConfidence: number;
+  q: string;
+  includeSocial: boolean;
 };
 
-function warFocusScore(event: DashboardEvent): number {
+const DEFAULT_FILTERS: MonitorFilters = {
+  timeRangeHours: 24,
+  minConfidence: 45,
+  q: "",
+  includeSocial: false,
+};
+
+const TIME_WINDOWS = [
+  { label: "1h", value: 1 },
+  { label: "6h", value: 6 },
+  { label: "24h", value: 24 },
+  { label: "72h", value: 72 },
+  { label: "7d", value: 24 * 7 },
+] as const;
+
+function usIranSignalScore(event: DashboardEvent): number {
   const text = `${event.title} ${event.summary}`.toLowerCase();
-  const usTerms = ["united states", "u.s.", "us ", "us-", "pentagon", "centcom", "american"];
+  const usTerms = ["united states", "u.s.", "pentagon", "centcom", "american"];
   const iranTerms = ["iran", "tehran", "isfahan", "natanz", "qom", "tabriz"];
-  const strikeTerms = ["strike", "airstrike", "attack", "missile", "drone", "bombard", "retaliat"];
+  const strikeTerms = ["strike", "airstrike", "attack", "missile", "drone", "retaliat", "explosion"];
 
   const count = (terms: string[]) => terms.reduce((acc, term) => acc + (text.includes(term) ? 1 : 0), 0);
   const us = count(usTerms);
   const iran = count(iranTerms);
   const strike = count(strikeTerms);
+
   return us * 3 + iran * 2 + strike * 2 + (us > 0 && iran > 0 ? 4 : 0);
 }
 
-function isUSLinkedStrike(event: DashboardEvent): boolean {
-  const strikeCategories = new Set([
-    "strike",
-    "missile",
-    "drone",
-    "explosion",
-    "air_defense",
-    "military_base",
-  ]);
-  return warFocusScore(event) >= 6 && strikeCategories.has(event.category);
+function priorityScore(event: DashboardEvent): number {
+  const ageHours = Math.max(0, (Date.now() - event.eventTs) / (60 * 60 * 1000));
+  const recency = Math.max(0, 30 - ageHours * 2.4);
+  const corroboration = Math.min(16, event.sources.length * 3);
+  const sourceSpread = event.sourceTypes.length * 6;
+  const focus = usIranSignalScore(event) * 3.5;
+
+  return event.confidence * 0.65 + recency + corroboration + sourceSpread + focus;
+}
+
+function confidenceTone(label: string) {
+  if (label === "High") return "bg-[#deefd8] text-[#245b1f] border-[#badca9]";
+  if (label === "Medium") return "bg-[#fff1cf] text-[#7f5d0f] border-[#e5d39a]";
+  return "bg-[#ffe2dd] text-[#8b3126] border-[#efb8ae]";
+}
+
+function topSourceDomains(events: DashboardEvent[]): Array<{ host: string; count: number }> {
+  const counts = new Map<string, number>();
+
+  for (const event of events) {
+    for (const source of event.sources) {
+      if (!source.url) continue;
+      try {
+        const host = new URL(source.url).hostname.replace(/^www\./, "").toLowerCase();
+        counts.set(host, (counts.get(host) ?? 0) + 1);
+      } catch {
+        continue;
+      }
+    }
+  }
+
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 7)
+    .map(([host, count]) => ({ host, count }));
+}
+
+function numberFromSignal(signal: SignalRecord | undefined, key: string): number | null {
+  if (!signal) return null;
+  const value = Number(signal.payload?.[key]);
+  return Number.isFinite(value) ? value : null;
 }
 
 export function DashboardPage() {
-  const [filters, setFilters] = useState<DashboardFilters>(DEFAULT_FILTERS);
-  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  const [filters, setFilters] = useState<MonitorFilters>(DEFAULT_FILTERS);
   const [tick, setTick] = useState(() => Date.now());
-  const userLanguage = useUserLanguage();
-  const [languagePreference, setLanguagePreference] = useState("auto");
-  const activeLanguage = useMemo(() => {
-    if (languagePreference === "auto") {
-      return normalizeLanguage(userLanguage);
-    }
-    return normalizeLanguage(languagePreference);
-  }, [languagePreference, userLanguage]);
 
   useEffect(() => {
     const timer = setInterval(() => setTick(Date.now()), 60_000);
     return () => clearInterval(timer);
   }, []);
 
-  const enabledTypes = useMemo(() => {
-    return (Object.entries(filters.sourceTypes) as Array<[
-      keyof DashboardFilters["sourceTypes"],
-      boolean,
-    ]>)
-      .filter(([, enabled]) => enabled)
-      .map(([type]) => type);
-  }, [filters.sourceTypes]);
+  const activeTypes = filters.includeSocial ? undefined : (["news", "signals"] as const);
 
   const eventsQuery = useQuery(api.events.getEvents, {
     since: tick - filters.timeRangeHours * 60 * 60 * 1000,
     minConfidence: filters.minConfidence,
-    category: filters.category === "all" ? undefined : (filters.category as never),
-    types: enabledTypes.length === 3 ? undefined : (enabledTypes as never),
-    q: filters.q.trim() ? filters.q.trim() : undefined,
+    q: filters.q.trim() || undefined,
+    types: activeTypes as never,
   }) as DashboardEvent[] | undefined;
 
   const stats = useQuery(api.events.getStats, {});
+
   const connectivitySignalsQuery = useQuery(api.events.getSignals, {
     type: "connectivity",
   }) as SignalRecord[] | undefined;
+
   const flightSignalsQuery = useQuery(api.events.getSignals, {
     type: "flight",
   }) as SignalRecord[] | undefined;
+
   const firmsSignalsQuery = useQuery(api.events.getSignals, {
     type: "firms",
   }) as SignalRecord[] | undefined;
-  const alertsQuery = useQuery(api.events.getAlerts, {}) as AlertRule[] | undefined;
-  const notificationsQuery = useQuery(api.events.getNotifications, {
-    unreadOnly: true,
-  }) as NotificationItem[] | undefined;
 
   const events = useMemo(() => eventsQuery ?? [], [eventsQuery]);
+
   const prioritizedEvents = useMemo(() => {
     return [...events].sort((a, b) => {
-      const aScore = warFocusScore(a);
-      const bScore = warFocusScore(b);
-      return bScore - aScore || b.confidence - a.confidence || b.eventTs - a.eventTs;
+      const score = priorityScore(b) - priorityScore(a);
+      return score || b.confidence - a.confidence || b.eventTs - a.eventTs;
     });
   }, [events]);
+
   const connectivitySignals = useMemo(
     () => connectivitySignalsQuery ?? [],
     [connectivitySignalsQuery],
   );
   const flightSignals = useMemo(() => flightSignalsQuery ?? [], [flightSignalsQuery]);
   const firmsSignals = useMemo(() => firmsSignalsQuery ?? [], [firmsSignalsQuery]);
-  const alerts = useMemo(() => alertsQuery ?? [], [alertsQuery]);
-  const notifications = useMemo(() => notificationsQuery ?? [], [notificationsQuery]);
-
-  const translationSeedTexts = useMemo(() => {
-    const texts: string[] = [
-      "event",
-      "events",
-      "US-Iran Global Conflict Monitor",
-      "Ongoing US-Iran Strikes, Attacks, and Escalation Signals Worldwide",
-      "Prioritized tracking of US-linked strikes and attacks across Iran, Iraq, Syria, Yemen, Lebanon, Red Sea, and other theaters.",
-      "Unverified",
-      "UNVERIFIED",
-      "UTC",
-      "Local",
-      "Time",
-      "Confidence",
-      "Location",
-      "Category",
-      "Source Types",
-      "Search",
-      "keyword or location",
-      "Live clustering, confidence scoring, corroboration-aware event stream.",
-      "high-confidence events in current window",
-      "US-linked strike events in current window",
-      "Latest update",
-      "Source mix",
-      "US-linked strikes",
-      "Latest US-linked",
-      "No sudden flight drops detected in this window.",
-      "No hotspot rows yet for selected window.",
-      "No notifications yet.",
-      "Max confidence",
-      "drop",
-      "Show",
-      "Hide",
-      "High",
-      "Medium",
-      "Low",
-      "news",
-      "signals",
-      "social",
-      "AI Situation Analysis",
-      "Key Developments",
-      "Assessed Risks",
-      "Monitoring Gaps",
-      "Recommended Checks",
-      "Updating...",
-      "Mode",
-      "Analysis error",
-      "Generating AI briefing...",
-      "AI briefing will appear when event data is available.",
-      "Updated",
-    ];
-
-    for (const event of prioritizedEvents.slice(0, 40)) {
-      texts.push(event.title, event.summary, event.placeName);
-      texts.push(...event.whatWeKnow.slice(0, 3));
-      texts.push(...event.whatWeDontKnow.slice(0, 3));
-    }
-
-    for (const signal of connectivitySignals.slice(0, 60)) {
-      const region = signal.payload?.region;
-      const title = signal.payload?.title;
-      const summary = signal.payload?.summary;
-      if (typeof region === "string") texts.push(region);
-      if (typeof title === "string") texts.push(title);
-      if (typeof summary === "string") texts.push(summary);
-    }
-
-    for (const signal of flightSignals.slice(0, 60)) {
-      const city = signal.payload?.city;
-      if (typeof city === "string") texts.push(city);
-    }
-
-    for (const signal of firmsSignals.slice(0, 60)) {
-      const region = signal.payload?.region;
-      if (typeof region === "string") texts.push(region);
-    }
-
-    for (const notification of notifications.slice(0, 100)) {
-      texts.push(notification.message);
-    }
-
-    return Array.from(new Set(texts.filter(Boolean)));
-  }, [prioritizedEvents, connectivitySignals, flightSignals, firmsSignals, notifications]);
-
-  const { translateText } = useEventTranslation(prioritizedEvents, activeLanguage, translationSeedTexts);
-  const copy = useMemo(
-    () => (key: string, fallback: string) => uiCopy(activeLanguage, key, fallback),
-    [activeLanguage],
-  );
-
-  const sourceMix = useMemo(() => {
-    const mix = {
-      news: 0,
-      signals: 0,
-      social: 0,
-    };
-    for (const event of prioritizedEvents) {
-      if (event.sourceTypes.includes("news")) mix.news += 1;
-      if (event.sourceTypes.includes("signals")) mix.signals += 1;
-      if (event.sourceTypes.includes("social")) mix.social += 1;
-    }
-    return mix;
-  }, [prioritizedEvents]);
-
-  const topLocations = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const event of prioritizedEvents) {
-      counts.set(event.placeName, (counts.get(event.placeName) ?? 0) + 1);
-    }
-    return [...counts.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 4);
-  }, [prioritizedEvents]);
-
-  const topCategories = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const event of prioritizedEvents) {
-      counts.set(event.category, (counts.get(event.category) ?? 0) + 1);
-    }
-    return [...counts.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 4);
-  }, [prioritizedEvents]);
 
   const highConfidenceCount = useMemo(
     () => prioritizedEvents.filter((event) => event.confidence >= 75).length,
     [prioritizedEvents],
   );
-  const usLinkedStrikeCount = useMemo(
-    () => prioritizedEvents.filter((event) => isUSLinkedStrike(event)).length,
-    [prioritizedEvents],
-  );
-  const latestEventTs = prioritizedEvents[0]?.eventTs;
-  const latestUSLinkedTs = useMemo(
-    () => prioritizedEvents.find((event) => isUSLinkedStrike(event))?.eventTs,
+
+  const usIranDirectCount = useMemo(
+    () => prioritizedEvents.filter((event) => usIranSignalScore(event) >= 8).length,
     [prioritizedEvents],
   );
 
-  const selectedEvent = useMemo(
-    () => prioritizedEvents.find((event) => event._id === selectedEventId) ?? null,
-    [prioritizedEvents, selectedEventId],
-  );
+  const mostRecentEventTs = prioritizedEvents[0]?.eventTs;
+
+  const dominantDomains = useMemo(() => topSourceDomains(prioritizedEvents), [prioritizedEvents]);
+
+  const latestConnectivity = connectivitySignals[0];
+  const latestFlight = flightSignals[0];
+  const latestFirms = firmsSignals[0];
+
+  const latestConnectivityPct = numberFromSignal(latestConnectivity, "availabilityPct");
+  const latestFlightCount = numberFromSignal(latestFlight, "count");
+  const latestFirmsBrightness = numberFromSignal(latestFirms, "brightness");
 
   return (
-    <main className="min-h-screen p-3 text-slate-900 sm:p-5 lg:p-6">
-      <header className="mb-4 rounded-lg border border-slate-200 bg-white p-4">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <p className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-slate-700">
-              <Radar className="h-3.5 w-3.5" /> {translateText("US-Iran Global Conflict Monitor")}
+    <main className="monitor-shell min-h-screen px-3 py-4 sm:px-5 sm:py-6 lg:px-8">
+      <section className="monitor-hero monitor-card p-5 sm:p-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="max-w-3xl">
+            <p className="inline-flex items-center gap-2 rounded-full border border-[#d9d2c1] bg-[#f8f3e8] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#5f4b2a]">
+              <Radar className="h-3.5 w-3.5" /> Conflict Tracker v2
             </p>
-            <h1 className="mt-2 text-xl font-semibold text-slate-900 sm:text-2xl">
-              {translateText("Ongoing US-Iran Strikes, Attacks, and Escalation Signals Worldwide")}
+            <h1 className="mt-3 text-2xl font-semibold text-[#1a1b25] sm:text-3xl">
+              US-Iran Conflict Intelligence Desk
             </h1>
-            <p className="mt-1 text-sm text-slate-600">
-              {translateText("Prioritized tracking of US-linked strikes and attacks across Iran, Iraq, Syria, Yemen, Lebanon, Red Sea, and other theaters.")}
+            <p className="mt-2 max-w-2xl text-sm text-[#36364a] sm:text-base">
+              High-signal aggregation of trusted news, technical indicators, and optional social signals for the
+              current US-Iran conflict cycle. Synthetic records are disabled.
             </p>
           </div>
 
-          <label className="flex items-center gap-2 text-xs text-slate-600">
-            <Globe2 className="h-3.5 w-3.5 text-slate-500" />
-            <span className="font-semibold uppercase tracking-wide">
-              {copy("language", "Language")}
-            </span>
-            <select
-              value={languagePreference}
-              onChange={(event) => setLanguagePreference(event.target.value)}
-              className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs text-slate-900"
-            >
-              <option value="auto">Auto ({userLanguage || "en"})</option>
-              <option value="en">English</option>
-              <option value="es">Español</option>
-              <option value="fr">Français</option>
-              <option value="ar">العربية</option>
-              <option value="fa">فارسی</option>
-              <option value="tr">Türkçe</option>
-            </select>
-          </label>
-        </div>
-
-        <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4">
-          <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
-            <p className="uppercase tracking-wide text-slate-500">{copy("events24h", "Events (24h)")}</p>
-            <p className="mt-1 text-lg font-semibold text-slate-900">
-              {stats ? shortNumber(stats.totalEvents24h) : "..."}
+          <div className="grid gap-2 text-xs text-[#4f4f63]">
+            <p className="inline-flex items-center gap-2 rounded-lg border border-[#ddd8cb] bg-white px-3 py-2">
+              <RefreshCcw className="h-3.5 w-3.5" /> refreshed every minute
             </p>
-          </div>
-          <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs">
-            <p className="uppercase tracking-wide text-slate-500">{translateText("US-linked strikes")}</p>
-            <p className="mt-1 text-lg font-semibold text-slate-900">{usLinkedStrikeCount}</p>
-          </div>
-          <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs">
-            <p className="uppercase tracking-wide text-slate-500">{translateText("High confidence")}</p>
-            <p className="mt-1 text-lg font-semibold text-slate-900">{highConfidenceCount}</p>
-          </div>
-          <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs">
-            <p className="uppercase tracking-wide text-slate-500">{translateText("Latest US-linked")}</p>
-            <p className="mt-1 text-sm font-semibold text-slate-900">
-              {latestUSLinkedTs ? formatAgo(latestUSLinkedTs) : "..."}
+            <p className="inline-flex items-center gap-2 rounded-lg border border-[#ddd8cb] bg-white px-3 py-2">
+              <ShieldAlert className="h-3.5 w-3.5" /> strict trust filter active
             </p>
           </div>
         </div>
-      </header>
 
-      <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-        {translateText(
-          "Signals and social reports may be incomplete or inaccurate. Confidence reflects corroboration, not certainty.",
-        )}
-      </div>
-
-      <section className="mb-4 grid gap-3 rounded-lg border border-slate-200 bg-white p-4 text-xs text-slate-700 lg:grid-cols-4">
-        <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-          <p className="uppercase tracking-wide text-slate-500">{copy("intelligenceSnapshot", "Intelligence Snapshot")}</p>
-          <p className="mt-1 text-sm font-semibold text-slate-900">
-            {usLinkedStrikeCount} {translateText("US-linked strike events in current window")}
-          </p>
-          <p className="mt-1 text-slate-500">
-            {translateText("Latest update")}: {latestEventTs ? formatAgo(latestEventTs) : "..."}
-          </p>
-        </div>
-        <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-          <p className="uppercase tracking-wide text-slate-500">{translateText("Source mix")}</p>
-          <p className="mt-1">
-            {translateText("News")}: <span className="font-semibold text-slate-900">{sourceMix.news}</span>
-          </p>
-          <p>
-            {translateText("Signals")}: <span className="font-semibold text-slate-900">{sourceMix.signals}</span>
-          </p>
-          <p>
-            {translateText("Social")}: <span className="font-semibold text-slate-900">{sourceMix.social}</span>
-          </p>
-        </div>
-        <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-          <p className="uppercase tracking-wide text-slate-500">{copy("topLocations", "Top Locations")}</p>
-          {topLocations.length === 0 ? (
-            <p className="mt-1 text-slate-500">...</p>
-          ) : (
-            topLocations.map(([place, count]) => (
-              <p key={place} className="mt-1">
-                {translateText(place)}: <span className="font-semibold text-slate-900">{count}</span>
-              </p>
-            ))
-          )}
-        </div>
-        <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-          <p className="uppercase tracking-wide text-slate-500">{copy("topCategories", "Top Categories")}</p>
-          {topCategories.length === 0 ? (
-            <p className="mt-1 text-slate-500">...</p>
-          ) : (
-            topCategories.map(([category, count]) => (
-              <p key={category} className="mt-1">
-                {translateText(category.replace(/_/g, " "))}:{" "}
-                <span className="font-semibold text-slate-900">{count}</span>
-              </p>
-            ))
-          )}
+        <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <article className="monitor-metric">
+            <p>Events In Window</p>
+            <strong>{stats ? shortNumber(stats.totalEvents24h) : "..."}</strong>
+          </article>
+          <article className="monitor-metric">
+            <p>High Confidence</p>
+            <strong>{highConfidenceCount}</strong>
+          </article>
+          <article className="monitor-metric">
+            <p>US-Iran Direct</p>
+            <strong>{usIranDirectCount}</strong>
+          </article>
+          <article className="monitor-metric">
+            <p>Latest Update</p>
+            <strong>{mostRecentEventTs ? formatAgo(mostRecentEventTs) : "..."}</strong>
+          </article>
         </div>
       </section>
 
-      <FiltersBar filters={filters} onChange={setFilters} translateText={translateText} />
+      <section className="monitor-card mt-4 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            {TIME_WINDOWS.map((window) => (
+              <button
+                key={window.value}
+                type="button"
+                onClick={() => setFilters((prev) => ({ ...prev, timeRangeHours: window.value }))}
+                className={`rounded-full border px-3 py-1 text-xs font-semibold tracking-wide transition ${
+                  filters.timeRangeHours === window.value
+                    ? "border-[#1f202f] bg-[#1f202f] text-white"
+                    : "border-[#d5d0c4] bg-white text-[#3f4055] hover:border-[#8a7a53]"
+                }`}
+              >
+                {window.label}
+              </button>
+            ))}
+          </div>
 
-      <AIAnalysisPanel
-        events={prioritizedEvents}
-        connectivitySignals={connectivitySignals}
-        flightSignals={flightSignals}
-        firmsSignals={firmsSignals}
-        language={activeLanguage}
-        translateText={translateText}
-      />
+          <label className="inline-flex items-center gap-2 text-xs text-[#4d4e62]">
+            <input
+              type="checkbox"
+              checked={filters.includeSocial}
+              onChange={(event) =>
+                setFilters((prev) => ({
+                  ...prev,
+                  includeSocial: event.target.checked,
+                }))
+              }
+            />
+            include unverified social signals
+          </label>
+        </div>
+
+        <div className="mt-3 grid gap-3 md:grid-cols-[1fr_220px]">
+          <label className="text-xs text-[#58586e]">
+            <span className="mb-1 block font-semibold uppercase tracking-[0.14em]">Search</span>
+            <input
+              value={filters.q}
+              onChange={(event) => setFilters((prev) => ({ ...prev, q: event.target.value }))}
+              placeholder="keyword, location, actor"
+              className="w-full rounded-lg border border-[#d8d2c5] bg-white px-3 py-2 text-sm text-[#1f2031] outline-none transition focus:border-[#947b45]"
+            />
+          </label>
+
+          <label className="text-xs text-[#58586e]">
+            <span className="mb-1 block font-semibold uppercase tracking-[0.14em]">Min Confidence</span>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={filters.minConfidence}
+              onChange={(event) =>
+                setFilters((prev) => ({ ...prev, minConfidence: Number(event.target.value) }))
+              }
+              className="w-full"
+            />
+            <span className="font-mono text-xs text-[#3f4055]">{filters.minConfidence}+</span>
+          </label>
+        </div>
+      </section>
+
+      <section className="mt-4">
+        <AIAnalysisPanel
+          events={prioritizedEvents}
+          connectivitySignals={connectivitySignals}
+          flightSignals={flightSignals}
+          firmsSignals={firmsSignals}
+          language="en"
+        />
+      </section>
 
       <section className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
-        <div className="xl:col-span-4">
-          <MapPanel
-            events={prioritizedEvents}
-            selectedEvent={selectedEvent}
-            onSelectEvent={(event) => setSelectedEventId(event._id)}
-            onCloseDrawer={() => setSelectedEventId(null)}
-            translateText={translateText}
-            labels={{
-              confidenceMap: copy("confidenceMap", "Confidence Map"),
-              eventDetail: copy("eventDetail", "Event Detail"),
-              whatWeKnow: copy("whatWeKnow", "What We Know"),
-              whatWeDontKnow: copy("whatWeDontKnow", "What We Don't Know"),
-              sourceLinks: copy("sourceLinks", "Source Links"),
-            }}
-          />
+        <div className="xl:col-span-7">
+          <div className="monitor-card p-4 sm:p-5">
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-[#6f6f85]">Priority Feed</h2>
+              <p className="text-xs text-[#626277]">sorted by confidence, recency, and US-Iran signal strength</p>
+            </div>
+
+            <div className="mt-3 space-y-3">
+              {prioritizedEvents.length === 0 ? (
+                <p className="rounded-lg border border-[#e4e0d5] bg-[#faf8f2] px-3 py-2 text-sm text-[#636379]">
+                  No events matched current filters.
+                </p>
+              ) : (
+                prioritizedEvents.slice(0, 40).map((event) => (
+                  <article key={event._id} className="rounded-xl border border-[#e7e2d7] bg-white p-3">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <h3 className="text-base font-semibold text-[#1c1d2a]">{event.title}</h3>
+                        <p className="mt-1 text-xs text-[#6a6a7f]">
+                          {event.placeName} • {event.category.replace(/_/g, " ")} • {formatAgo(event.eventTs)}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`rounded-full border px-2 py-1 text-[11px] font-semibold ${confidenceTone(event.confidenceLabel)}`}
+                        >
+                          {event.confidenceLabel} {Math.round(event.confidence)}
+                        </span>
+                        <span className="rounded-full border border-[#ddd7ca] bg-[#faf8f2] px-2 py-1 text-[11px] font-semibold text-[#5a4b2b]">
+                          score {Math.round(priorityScore(event))}
+                        </span>
+                      </div>
+                    </div>
+
+                    <p className="mt-2 text-sm text-[#323347]">{event.summary}</p>
+
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {event.sourceTypes.map((type) => (
+                        <span
+                          key={type}
+                          className="rounded-full border border-[#d8d2c5] bg-[#f7f4ec] px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-[#655a45]"
+                        >
+                          {type}
+                        </span>
+                      ))}
+                    </div>
+
+                    <details className="mt-2 rounded-lg border border-[#ece7dc] bg-[#fcfaf5] px-3 py-2">
+                      <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.12em] text-[#6f6f85]">
+                        Evidence and Source Links
+                      </summary>
+
+                      <div className="mt-2 space-y-2 text-sm text-[#333349]">
+                        {event.whatWeKnow.length > 0 ? (
+                          <div>
+                            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-[#6f6f85]">What We Know</p>
+                            <ul className="mt-1 space-y-1">
+                              {event.whatWeKnow.map((line) => (
+                                <li key={line}>- {line}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : null}
+
+                        {event.whatWeDontKnow.length > 0 ? (
+                          <div>
+                            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-[#6f6f85]">What We Don&apos;t Know</p>
+                            <ul className="mt-1 space-y-1">
+                              {event.whatWeDontKnow.map((line) => (
+                                <li key={line}>- {line}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : null}
+
+                        {event.sources.length > 0 ? (
+                          <div>
+                            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-[#6f6f85]">Sources</p>
+                            <ul className="mt-1 space-y-1">
+                              {event.sources.map((source) => (
+                                <li key={source._id} className="text-sm">
+                                  {source.url ? (
+                                    <a
+                                      href={source.url}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="text-[#2d4a89] underline decoration-[#98a8ca] underline-offset-2"
+                                    >
+                                      {source.sourceName}
+                                    </a>
+                                  ) : (
+                                    <span>{source.sourceName}</span>
+                                  )}{" "}
+                                  ({source.sourceType}, {formatAgo(source.publishedTs)})
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : null}
+                      </div>
+                    </details>
+                  </article>
+                ))
+              )}
+            </div>
+          </div>
         </div>
 
-        <div className="xl:col-span-4">
-          <EventsTimeline
-            events={prioritizedEvents}
-            selectedEventId={selectedEventId}
-            onSelect={(event) => setSelectedEventId(event._id)}
-            translateText={translateText}
-            labels={{
-              liveTimeline: copy("liveTimeline", "Live Timeline"),
-              newestFirst: copy("newestFirst", "Newest first"),
-              noEvents: copy("noEvents", "No events match current filters."),
-              whatWeKnow: copy("whatWeKnow", "What we know"),
-              whatWeDontKnow: copy("whatWeDontKnow", "What we don't know"),
-            }}
-          />
-        </div>
+        <div className="xl:col-span-5 space-y-4">
+          <aside className="monitor-card p-4 sm:p-5">
+            <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-[#6f6f85]">Signals Board</h2>
 
-        <div className="xl:col-span-4">
-          <SignalsPanel
-            connectivitySignals={connectivitySignals}
-            flightSignals={flightSignals}
-            firmsSignals={firmsSignals}
-            alerts={alerts}
-            notifications={notifications}
-            translateText={translateText}
-            labels={{
-              signals: copy("signals", "Signals"),
-              connectivity24h: copy("connectivity24h", "Connectivity (24h)"),
-              flightAlerts: copy("flightAlerts", "Flight Disruption Alerts"),
-              firmsHotspots: copy("firmsHotspots", "FIRMS Hotspots"),
-              notifications: copy("notifications", "In-app Notifications"),
-            }}
-          />
+            <div className="mt-3 space-y-3 text-sm text-[#2f3042]">
+              <div className="rounded-xl border border-[#e7e2d7] bg-[#fcfaf5] p-3">
+                <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-[#66667a]">
+                  <Signal className="h-4 w-4" /> Connectivity
+                </p>
+                <p className="mt-2 text-sm">
+                  {latestConnectivityPct !== null
+                    ? `${latestConnectivityPct.toFixed(1)}% availability estimate`
+                    : "No recent connectivity sample"}
+                </p>
+                <p className="mt-1 text-xs text-[#66667a]">
+                  {latestConnectivity ? formatAgo(latestConnectivity.createdAt) : "-"}
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-[#e7e2d7] bg-[#fcfaf5] p-3">
+                <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-[#66667a]">
+                  <Radio className="h-4 w-4" /> Flight
+                </p>
+                <p className="mt-2 text-sm">
+                  {latestFlightCount !== null ? `${Math.round(latestFlightCount)} tracked aircraft` : "No recent flight sample"}
+                </p>
+                <p className="mt-1 text-xs text-[#66667a]">{latestFlight ? formatAgo(latestFlight.createdAt) : "-"}</p>
+              </div>
+
+              <div className="rounded-xl border border-[#e7e2d7] bg-[#fcfaf5] p-3">
+                <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-[#66667a]">
+                  <Gauge className="h-4 w-4" /> FIRMS Thermal
+                </p>
+                <p className="mt-2 text-sm">
+                  {latestFirmsBrightness !== null
+                    ? `latest brightness index ${Math.round(latestFirmsBrightness)}`
+                    : "No recent FIRMS hotspot sample"}
+                </p>
+                <p className="mt-1 text-xs text-[#66667a]">{latestFirms ? formatAgo(latestFirms.createdAt) : "-"}</p>
+              </div>
+            </div>
+          </aside>
+
+          <aside className="monitor-card p-4 sm:p-5">
+            <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-[#6f6f85]">Source Radar</h2>
+
+            <div className="mt-3 space-y-2 text-sm text-[#2f3042]">
+              {dominantDomains.length === 0 ? (
+                <p className="rounded-lg border border-[#e4e0d5] bg-[#faf8f2] px-3 py-2 text-sm text-[#636379]">
+                  No source links available in current window.
+                </p>
+              ) : (
+                dominantDomains.map((item) => (
+                  <p key={item.host} className="flex items-center justify-between rounded-lg border border-[#e7e2d7] bg-[#fcfaf5] px-3 py-2">
+                    <span className="inline-flex items-center gap-2">
+                      <Globe className="h-3.5 w-3.5 text-[#7a7a91]" /> {item.host}
+                    </span>
+                    <span className="font-mono text-xs">{item.count}</span>
+                  </p>
+                ))
+              )}
+            </div>
+
+            {stats?.latestIngestRuns?.length ? (
+              <div className="mt-4 rounded-xl border border-[#e7e2d7] bg-[#fffdf9] p-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#66667a]">Ingestion Health</p>
+                <ul className="mt-2 space-y-1.5 text-sm text-[#2f3042]">
+                  {(stats.latestIngestRuns as Array<{ _id: string; sourceName: string; status: string; startedAt: number; error?: string | null }>).slice(0, 6).map((run) => (
+                    <li key={run._id}>
+                      <span className="font-semibold">{run.sourceName}</span>: {run.status} ({formatAgo(run.startedAt)})
+                      {run.error ? (
+                        <span className="mt-1 block rounded border border-[#f1c8b5] bg-[#fff2ea] px-2 py-1 text-xs text-[#8a4123]">
+                          <AlertTriangle className="mr-1 inline h-3 w-3" /> {run.error}
+                        </span>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </aside>
         </div>
       </section>
     </main>

@@ -1,189 +1,97 @@
-# US-Iran Global Conflict Monitor
+# US-Iran Conflict Intelligence Desk
 
-Production-grade realtime dashboard built with Next.js App Router + Convex, focused on US-vs-Iran conflict activity across global theaters.
+A rebuilt Next.js + Convex monitoring app focused on one job: high-signal aggregation and AI summarization of the active US-Iran conflict cycle.
+
+## What Changed
+
+This version was reset around data quality:
+
+- Synthetic/mock ingestion is removed.
+- News ingestion now defaults to strict trusted-domain filtering.
+- Old/noisy rows are filtered by relevance + recency.
+- Social ingestion is optional and heavily gated.
+- AI briefing is now powered directly by OpenRouter using `OPEN_ROUTER_API`.
 
 ## Stack
-- Frontend: Next.js 16 (App Router), TypeScript, TailwindCSS, React Leaflet, Recharts
-- Backend: Convex (TypeScript)
-- Realtime: Convex subscriptions (`useQuery`)
-- Deployment: Vercel + Convex Cloud
 
-## What It Does
-- Aggregates **Confirmed News** from multi-source adapters:
-  - GDELT 2.1
+- Frontend: Next.js 16, React 19, Tailwind 4
+- Backend: Convex
+- AI summarization: OpenRouter Chat Completions API
+
+## Core Data Sources
+
+- News (primary):
+  - GDELT (strict filtering on accepted rows)
   - Guardian API
-  - Optional key-based APIs: NewsAPI, GNews, MediaStack, NYTimes, NewsData, TheNewsAPI
-  - RSS API-style feeds: BBC, Al Jazeera, NYTimes World, Guardian World
-- Aggregates **Signals**:
-  - NASA FIRMS hotspots
-  - OpenSky flight snapshots with ADSB.lol fallback
-  - Connectivity adapter with pluggable provider + OONI anomaly telemetry
-- Supports optional **Social feed** adapters (always unverified):
+  - Curated RSS (BBC, Al Jazeera, NYTimes, Guardian, Reuters)
+- Signals:
+  - OONI connectivity anomalies
+  - OpenSky (with ADSB.lol fallback) flight observations
+  - NASA FIRMS hotspots (if `FIRMS_API_KEY` is set)
+- Social (optional, unverified):
+  - Reddit (quality-gated)
+  - X recent search (quality-gated)
   - Custom social endpoint
-  - X API recent search (`/2/tweets/search/recent`)
-  - Reddit JSON API enrichment
-  - Mock fallback when enabled but no live social source is available
-- Clusters duplicate reports into unified events
-- Computes dynamic confidence scores and confidence labels
-- Separates News vs Signals vs Social in UI
-- Stores and evaluates user alert rules with in-app notifications
-- Auto-translates dashboard content to user/browser language with DeepL or LibreTranslate fallback
-- Adds AI-generated situation briefing using Vercel AI SDK endpoint (`/api/analysis`)
 
-## Safety UX
-- Banner disclaimer shown on dashboard:
-  - `Signals and social reports may be incomplete or inaccurate. Confidence reflects corroboration, not certainty.`
-- Social-only reports are labeled `UNVERIFIED`
-- Raw source links are shown on event cards and in event drawer
-- Contradictory reports set event conflict state instead of silent merge
+## Environment
 
-## Convex Data Model
-- `events`
-- `sources`
-- `signals`
-- `ingestRuns`
-- `alerts`
-- `notifications`
-
-See [convex/schema.ts](./convex/schema.ts).
-
-## Ingestion Schedules
-Defined in [convex/crons.ts](./convex/crons.ts):
-- `ingestGdelt()` every 2 minutes
-- `ingestFirms()` every 5 minutes
-- `ingestFlights()` every 5 minutes
-- `ingestConnectivity()` every 5 minutes
-- `ingestSocial()` every 5 minutes only when `ENABLE_SOCIAL_INGESTION=true`
-
-## Public Convex API
-Implemented in [convex/events.ts](./convex/events.ts):
-- Queries:
-  - `getEvents({ since, until, minConfidence, category, types, q })`
-  - `getEventById(id)`
-  - `getSignals(type)`
-  - `getStats()`
-- Mutations:
-  - `upsertEvent`
-  - `attachSource`
-  - `createAlert`
-  - `deleteAlert`
-
-## Clustering + Confidence
-Implemented in:
-- [convex/lib/clustering.ts](./convex/lib/clustering.ts)
-- [convex/lib/confidence.ts](./convex/lib/confidence.ts)
-- [convex/ingestionPipeline.ts](./convex/ingestionPipeline.ts)
-
-Rules implemented:
-- Cluster by:
-  - time window ±45 minutes
-  - geo proximity ≤30km
-  - keyword similarity / category match
-- Confidence base:
-  - news: 60
-  - signals: 40
-  - social: 20
-- Confidence modifiers:
-  - +15 per independent news source (max +30)
-  - +10 signals corroboration
-  - +10 geo precise
-  - -15 if only social after 60 mins
-  - -10 conflicting reports
-- Labels:
-  - `High >= 75`
-  - `Medium 45-74`
-  - `Low < 45`
-
-## Local Setup
-
-### 1) Scaffold command (reference)
-This project was created with:
-
-```bash
-npx create-next-app@latest conflict-tracker --typescript --tailwind --eslint --app --use-npm --no-src-dir
-```
-
-### 2) Install dependencies
-```bash
-npm install
-```
-
-### 3) Configure environment
-Copy `.env.example` to `.env.local` and fill values:
+Copy `.env.example` to `.env.local` and fill what you use:
 
 ```bash
 cp .env.example .env.local
 ```
 
-Required:
+### Required
+
 - `NEXT_PUBLIC_CONVEX_URL`
 
-Optional:
-- `GUARDIAN_API_KEY` (`test` works for low-volume)
-- `NEWSAPI_KEY`
-- `GNEWS_API_KEY`
-- `MEDIASTACK_API_KEY`
-- `NYTIMES_API_KEY`
-- `NEWSDATA_API_KEY`
-- `THENEWSAPI_KEY`
-- `PREFERRED_NEWS_LANGUAGE`
-- `INCLUDE_NON_ENGLISH_NEWS`
-- `FOCUS_US_IRAN`
-- `FIRMS_API_KEY`
-- `FIRMS_SATELLITE`
-- `OPENSKY_USERNAME`
-- `OPENSKY_PASSWORD`
-- `CONNECTIVITY_PROVIDER` (`mock` default)
-- `CONNECTIVITY_INCLUDE_OONI`
-- `ENABLE_SOCIAL_INGESTION`
-- `SOCIAL_FEED_ENDPOINT`
-- `SOCIAL_FEED_TOKEN`
-- `SOCIAL_REDDIT_ENABLED`
-- `SOCIAL_X_ENABLED`
-- `X_API_BEARER_TOKEN`
-- `X_API_BASE_URL`
-- `X_API_QUERY`
-- `X_API_MAX_RESULTS`
-- `X_API_LANG`
-- `X_API_INCLUDE_REPLIES`
-- `DEEPL_API_KEY`
-- `AI_GATEWAY_API_KEY`
-- `AI_SUMMARY_MODEL`
+### AI Briefing (required for model summaries)
 
-### 4) Start Convex dev
+- `OPEN_ROUTER_API`
+- `OPEN_ROUTER_MODEL` (default: `openai/gpt-4o-mini`)
+
+If `OPEN_ROUTER_API` is missing or OpenRouter fails, the app falls back to deterministic local synthesis.
+
+## Run Locally
+
+1. Install deps:
+
+```bash
+npm install
+```
+
+2. Start Convex dev:
+
 ```bash
 npx convex dev
 ```
 
-This step links/creates your Convex deployment and generates real `convex/_generated/*` bindings.
+3. Run Next.js:
 
-### 5) Run Next.js
 ```bash
 npm run dev
 ```
 
-### Validation
+## Ingestion Schedules
+
+Defined in [`convex/crons.ts`](./convex/crons.ts):
+
+- News every 2 minutes
+- FIRMS every 5 minutes
+- Flights every 5 minutes
+- Connectivity every 5 minutes
+- Social every 5 minutes (only when `ENABLE_SOCIAL_INGESTION=true`)
+
+## Quality Controls
+
+- Strict trust mode on by default: `STRICT_TRUSTED_NEWS=true`
+- News recency window: `MAX_NEWS_AGE_HOURS=72`
+- Social rows are never synthetic and are always marked unverified
+- AI output is shown with mode (`ai` or `fallback`) and model metadata
+
+## Validation
+
 ```bash
 npm run lint
 npm run build
 ```
-
-## Deploy (Convex + Vercel)
-
-### 1) Deploy Convex backend
-```bash
-npx convex deploy
-```
-
-### 2) Set frontend env to Convex production URL
-In Vercel project settings, set:
-- `NEXT_PUBLIC_CONVEX_URL=<your convex production url>`
-
-### 3) Deploy Next.js to Vercel
-```bash
-npx vercel --prod
-```
-
-## Notes
-- `convex/_generated/api.ts` and `convex/_generated/server.ts` in this repo are temporary compile stubs for one-shot buildability; `npx convex dev` overwrites them with real generated bindings.
-- Focus mode prioritizes US-linked Iran conflict reporting (`FOCUS_US_IRAN=true`), including events in Iran, Iraq, Syria, Yemen, Lebanon, Red Sea, Gulf corridors, and related theaters.

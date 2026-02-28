@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { AlertTriangle, Bot, LoaderCircle } from "lucide-react";
 import { formatAgo } from "@/lib/format";
 import { DashboardEvent, SignalRecord } from "@/lib/types";
 
@@ -19,8 +20,7 @@ type AIAnalysisPanelProps = {
   connectivitySignals: SignalRecord[];
   flightSignals: SignalRecord[];
   firmsSignals: SignalRecord[];
-  language: string;
-  translateText: (text: string) => string;
+  language?: string;
 };
 
 export function AIAnalysisPanel({
@@ -28,12 +28,12 @@ export function AIAnalysisPanel({
   connectivitySignals,
   flightSignals,
   firmsSignals,
-  language,
-  translateText,
+  language = "en",
 }: AIAnalysisPanelProps) {
   const [analysis, setAnalysis] = useState<AnalysisShape | null>(null);
   const [generatedAt, setGeneratedAt] = useState<number | null>(null);
   const [mode, setMode] = useState<"ai" | "fallback" | null>(null);
+  const [model, setModel] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -83,6 +83,9 @@ export function AIAnalysisPanel({
       setAnalysis(null);
       setGeneratedAt(null);
       setMode(null);
+      setModel(null);
+      setError(null);
+      setLoading(false);
       return;
     }
 
@@ -107,12 +110,21 @@ export function AIAnalysisPanel({
           analysis?: AnalysisShape;
           generatedAt?: number;
           mode?: "ai" | "fallback";
+          model?: string;
+          error?: string;
         };
 
-        if (json.analysis) {
-          setAnalysis(json.analysis);
-          setGeneratedAt(json.generatedAt ?? Date.now());
-          setMode(json.mode ?? null);
+        if (!json.analysis) {
+          throw new Error("Analysis payload was empty.");
+        }
+
+        setAnalysis(json.analysis);
+        setGeneratedAt(json.generatedAt ?? Date.now());
+        setMode(json.mode ?? null);
+        setModel(json.model ?? null);
+
+        if (json.error) {
+          setError(json.error);
         }
       } catch (err) {
         if ((err as Error).name !== "AbortError") {
@@ -121,7 +133,7 @@ export function AIAnalysisPanel({
       } finally {
         setLoading(false);
       }
-    }, 300);
+    }, 450);
 
     return () => {
       controller.abort();
@@ -130,88 +142,87 @@ export function AIAnalysisPanel({
   }, [events.length, payloadKey]);
 
   return (
-    <section className="mb-4 rounded-lg border border-slate-200 bg-white p-4">
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-700">
-          {translateText("AI Situation Analysis")}
-        </h2>
-        <p className="text-xs text-slate-500">
-          {mode ? `${translateText("Mode")}: ${mode}` : loading ? translateText("Updating...") : ""}
-        </p>
+    <section className="monitor-card p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-[#6f6f85]">
+          <Bot className="h-4 w-4" /> AI Executive Brief
+        </div>
+        <div className="flex flex-wrap items-center gap-2 text-[11px] text-[#6f6f85]">
+          {loading ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-[#e4e0d5] px-2 py-1">
+              <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> updating
+            </span>
+          ) : null}
+          {mode ? (
+            <span className="rounded-full border border-[#e4e0d5] px-2 py-1">mode: {mode}</span>
+          ) : null}
+          {model ? (
+            <span className="rounded-full border border-[#e4e0d5] px-2 py-1">model: {model}</span>
+          ) : null}
+          {generatedAt ? (
+            <span className="rounded-full border border-[#e4e0d5] px-2 py-1">updated {formatAgo(generatedAt)}</span>
+          ) : null}
+        </div>
       </div>
 
       {error ? (
-        <p className="mt-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
-          {translateText("Analysis error")}: {error}
+        <p className="mt-3 inline-flex items-start gap-2 rounded-lg border border-[#f1c8b5] bg-[#fff2ea] px-3 py-2 text-xs text-[#8a4123]">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5" />
+          {error}
         </p>
       ) : null}
 
       {!analysis ? (
-        <p className="mt-2 text-sm text-slate-500">
-          {loading
-            ? translateText("Generating AI briefing...")
-            : translateText("AI briefing will appear when event data is available.")}
+        <p className="mt-4 text-sm text-[#57576d]">
+          {loading ? "Generating conflict brief..." : "AI brief appears after events are loaded."}
         </p>
       ) : (
-        <div className="mt-3 grid gap-3 lg:grid-cols-2">
-          <div className="space-y-3 lg:col-span-2">
-            <p className="text-base font-semibold text-slate-900">{analysis.headline}</p>
-            <p className="text-sm text-slate-700">{analysis.executiveSummary}</p>
+        <>
+          <h2 className="mt-4 text-lg font-semibold text-[#1a1b25]">{analysis.headline}</h2>
+          <p className="mt-2 text-sm text-[#34344a]">{analysis.executiveSummary}</p>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <article className="rounded-xl border border-[#ece7dc] bg-[#fcfaf5] p-3">
+              <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-[#6f6f85]">Key Developments</h3>
+              <ul className="mt-2 space-y-1.5 text-sm text-[#2a2a3a]">
+                {analysis.keyDevelopments.map((row) => (
+                  <li key={row}>- {row}</li>
+                ))}
+              </ul>
+            </article>
+
+            <article className="rounded-xl border border-[#ece7dc] bg-[#fcfaf5] p-3">
+              <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-[#6f6f85]">Assessed Risks</h3>
+              <ul className="mt-2 space-y-1.5 text-sm text-[#2a2a3a]">
+                {analysis.assessedRisks.map((row) => (
+                  <li key={row}>- {row}</li>
+                ))}
+              </ul>
+            </article>
+
+            <article className="rounded-xl border border-[#ece7dc] bg-[#fcfaf5] p-3">
+              <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-[#6f6f85]">Monitoring Gaps</h3>
+              <ul className="mt-2 space-y-1.5 text-sm text-[#2a2a3a]">
+                {analysis.monitoringGaps.map((row) => (
+                  <li key={row}>- {row}</li>
+                ))}
+              </ul>
+            </article>
+
+            <article className="rounded-xl border border-[#ece7dc] bg-[#fcfaf5] p-3">
+              <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-[#6f6f85]">Recommended Checks</h3>
+              <ul className="mt-2 space-y-1.5 text-sm text-[#2a2a3a]">
+                {analysis.recommendedChecks.map((row) => (
+                  <li key={row}>- {row}</li>
+                ))}
+              </ul>
+            </article>
           </div>
 
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-              {translateText("Key Developments")}
-            </p>
-            <ul className="mt-2 space-y-1 text-sm text-slate-700">
-              {analysis.keyDevelopments.map((item) => (
-                <li key={item}>- {item}</li>
-              ))}
-            </ul>
-          </div>
-
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-              {translateText("Assessed Risks")}
-            </p>
-            <ul className="mt-2 space-y-1 text-sm text-slate-700">
-              {analysis.assessedRisks.map((item) => (
-                <li key={item}>- {item}</li>
-              ))}
-            </ul>
-          </div>
-
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-              {translateText("Monitoring Gaps")}
-            </p>
-            <ul className="mt-2 space-y-1 text-sm text-slate-700">
-              {analysis.monitoringGaps.map((item) => (
-                <li key={item}>- {item}</li>
-              ))}
-            </ul>
-          </div>
-
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-              {translateText("Recommended Checks")}
-            </p>
-            <ul className="mt-2 space-y-1 text-sm text-slate-700">
-              {analysis.recommendedChecks.map((item) => (
-                <li key={item}>- {item}</li>
-              ))}
-            </ul>
-          </div>
-
-          <div className="lg:col-span-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-            <p>{analysis.confidenceNote}</p>
-            {generatedAt ? (
-              <p className="mt-1 text-xs text-slate-500">
-                {translateText("Updated")} {formatAgo(generatedAt)}
-              </p>
-            ) : null}
-          </div>
-        </div>
+          <p className="mt-4 rounded-lg border border-[#ece7dc] bg-white px-3 py-2 text-xs text-[#57576d]">
+            {analysis.confidenceNote}
+          </p>
+        </>
       )}
     </section>
   );

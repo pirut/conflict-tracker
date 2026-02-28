@@ -1,30 +1,106 @@
 @import "tailwindcss";
 
 :root {
-  --bg: #f5f6f8;
-  --panel: #ffffff;
-  --line: #e2e8f0;
-  --text: #0f172a;
-  --text-dim: #475569;
-  --accent: #0f172a;
+  --bg-paper: #efe8d6;
+  --bg-ink: #1d1d2d;
+  --panel: #fffdfa;
+  --line: #dad3c3;
+  --text: #1a1b25;
+  --text-dim: #525269;
+  --accent: #8f7442;
 }
 
 @theme inline {
-  --font-sans: var(--font-manrope);
-  --font-mono: var(--font-plex-mono);
+  --font-sans: var(--font-body);
+  --font-mono: var(--font-mono);
 }
 
 * {
   box-sizing: border-box;
 }
 
+html,
 body {
   margin: 0;
-  color: var(--text);
-  background: var(--bg);
-  min-height: 100vh;
+  min-height: 100%;
 }
 
-.leaflet-container {
-  font-family: var(--font-manrope), sans-serif;
+body {
+  color: var(--text);
+  background:
+    radial-gradient(circle at 10% 8%, #f7f2e5 0%, #f7f2e5 20%, transparent 45%),
+    radial-gradient(circle at 88% 14%, #d9d4c9 0%, #d9d4c9 18%, transparent 45%),
+    linear-gradient(175deg, #f0e9d8 0%, #ece4d1 50%, #e6ddca 100%);
+  font-family: var(--font-body), serif;
+}
+
+.monitor-shell {
+  position: relative;
+}
+
+.monitor-shell::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.18;
+  background-image:
+    linear-gradient(transparent 95%, rgba(77, 67, 44, 0.18) 95%),
+    linear-gradient(90deg, transparent 95%, rgba(77, 67, 44, 0.18) 95%);
+  background-size: 32px 32px;
+}
+
+.monitor-card {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  box-shadow:
+    0 1px 0 rgba(66, 55, 28, 0.18),
+    0 12px 30px rgba(73, 62, 37, 0.08);
+}
+
+.monitor-hero {
+  position: relative;
+  overflow: hidden;
+}
+
+.monitor-hero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    125deg,
+    rgba(146, 123, 72, 0.07) 0%,
+    rgba(146, 123, 72, 0) 42%,
+    rgba(38, 60, 93, 0.08) 100%
+  );
+}
+
+.monitor-metric {
+  border: 1px solid #ddd7c9;
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: #fff;
+}
+
+.monitor-metric p {
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 10px;
+  font-weight: 700;
+  color: #6e6b5f;
+}
+
+.monitor-metric strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 20px;
+  color: #1d1e2c;
+  line-height: 1.1;
+}
+
+a {
+  color: inherit;
 }

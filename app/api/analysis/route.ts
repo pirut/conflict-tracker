@@ -1,4 +1,3 @@
-import { generateObject } from "ai";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
@@ -52,6 +51,10 @@ const analysisSchema = z.object({
   confidenceNote: z.string(),
 });
 
+type AnalysisShape = z.infer<typeof analysisSchema>;
+
+const ROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
+
 function normalizeLang(language?: string): string {
   if (!language) {
     return "en";
@@ -65,7 +68,7 @@ function sanitizeRequest(body: AnalysisRequest) {
     .slice(0, MAX_EVENTS)
     .map((event) => ({
       title: (event.title ?? "").slice(0, 260),
-      summary: (event.summary ?? "").slice(0, 500),
+      summary: (event.summary ?? "").slice(0, 520),
       category: event.category ?? "other",
       confidence: Number(event.confidence ?? 0),
       confidenceLabel: event.confidenceLabel ?? "Low",
@@ -111,12 +114,13 @@ function isUSLinkedStrikeEvent(event: {
   return score >= 6 && strikeCategory;
 }
 
-function fallbackAnalysis(payload: ReturnType<typeof sanitizeRequest>) {
+function fallbackAnalysis(payload: ReturnType<typeof sanitizeRequest>): AnalysisShape {
   const ranked = [...payload.events].sort((a, b) => {
     const aScore = usFocusScore(`${a.title} ${a.summary}`);
     const bScore = usFocusScore(`${b.title} ${b.summary}`);
     return bScore - aScore || b.confidence - a.confidence || b.eventTs - a.eventTs;
   });
+
   const topEvent = ranked[0];
   const highConfidence = payload.events.filter((event) => event.confidence >= 75).length;
   const usLinkedStrikeCount = payload.events.filter((event) =>
@@ -133,43 +137,139 @@ function fallbackAnalysis(payload: ReturnType<typeof sanitizeRequest>) {
       !event.sourceTypes.includes("signals"),
   ).length;
   const flightAnomalies = payload.flight.filter((row) => row.anomaly).length;
-  const lowConnectivity = payload.connectivity.filter(
-    (row) => Number(row.availabilityPct ?? 100) < 80,
-  ).length;
+  const lowConnectivity = payload.connectivity.filter((row) => Number(row.availabilityPct ?? 100) < 80).length;
 
   return {
     headline: topEvent
-      ? `US-Iran strike brief: ${topEvent.category.replace(/_/g, " ")} activity around ${topEvent.placeName}`
-      : "US-Iran strike brief: monitoring window active",
-    executiveSummary:
-      topEvent
-        ? `${payload.events.length} events in scope, with ${usLinkedStrikeCount} US-linked strike events and ${highConfidence} high-confidence clusters. Latest focal point: ${topEvent.placeName}.`
-        : "No event rows are currently available for AI synthesis.",
+      ? `US-Iran brief: ${topEvent.category.replace(/_/g, " ")} activity around ${topEvent.placeName}`
+      : "US-Iran brief: monitoring window active",
+    executiveSummary: topEvent
+      ? `${payload.events.length} events in scope, including ${usLinkedStrikeCount} US-linked strike clusters and ${highConfidence} high-confidence events.`
+      : "No event rows are currently available for synthesis.",
     keyDevelopments: [
-      `${payload.events.length} events processed for this window.`,
-      `${usLinkedStrikeCount} events match US-Iran strike criteria.`,
-      `${highConfidence} events are currently tagged high confidence.`,
-      `${flightAnomalies} flight anomaly signals and ${lowConnectivity} low-connectivity rows are present.`,
+      `${payload.events.length} total events passed current filters.`,
+      `${usLinkedStrikeCount} events match direct US-Iran strike criteria.`,
+      `${highConfidence} events are tagged high confidence.`,
+      `${flightAnomalies} flight anomaly signals and ${lowConnectivity} low-connectivity rows are active.`,
     ],
     assessedRisks: [
-      "Social-only claims remain high-noise and require corroboration.",
-      "Short-lived signal anomalies may reflect sensor/coverage changes, not only on-ground incidents.",
+      "Social-only claims remain high-noise until independently corroborated.",
+      "Single-snapshot anomalies can reflect sensor/coverage changes, not only on-ground disruption.",
       socialOnly > 0
-        ? `${socialOnly} social-only events are active and should not be treated as confirmed facts.`
-        : "Most active events are supported by at least one non-social signal or news source.",
+        ? `${socialOnly} social-only events are active and should be treated as unverified.`
+        : "Most events are supported by at least one non-social source.",
     ],
     monitoringGaps: [
       "Ground-truth casualty and damage confirmation is often delayed.",
-      "Coverage limitations can reduce flight/connectivity signal precision in local areas.",
-      "Some data providers may throttle or delay updates during high-volume periods.",
+      "Coverage limitations reduce local precision for flight and connectivity indicators.",
+      "Provider throttling can delay updates during surge periods.",
     ],
     recommendedChecks: [
-      "Track US-linked strike clusters over the next 30-60 minutes.",
+      "Track top US-linked clusters over the next 30-60 minutes.",
       "Cross-check social-only claims against trusted news and signal corroboration.",
-      "Verify whether connectivity and flight anomalies persist across multiple snapshots.",
+      "Confirm whether anomalies persist across multiple snapshots before escalation calls.",
     ],
-    confidenceNote:
-      "Automated fallback synthesis; use source links and confidence scoring for verification.",
+    confidenceNote: "Fallback synthesis generated locally without model inference.",
+  };
+}
+
+function stripCodeFence(input: string): string {
+  const trimmed = input.trim();
+  if (!trimmed.startsWith("```") || !trimmed.endsWith("```")) {
+    return trimmed;
+  }
+
+  return trimmed
+    .replace(/^```[a-zA-Z0-9_-]*\s*/, "")
+    .replace(/```$/, "")
+    .trim();
+}
+
+function extractJSONObject(input: string): string {
+  const stripped = stripCodeFence(input);
+  const start = stripped.indexOf("{");
+  const end = stripped.lastIndexOf("}");
+
+  if (start === -1 || end === -1 || end <= start) {
+    throw new Error("Model response did not contain JSON object payload.");
+  }
+
+  return stripped.slice(start, end + 1);
+}
+
+async function callOpenRouter(
+  payload: ReturnType<typeof sanitizeRequest>,
+  language: string,
+): Promise<{ analysis: AnalysisShape; model: string }> {
+  const apiKey = process.env.OPEN_ROUTER_API?.trim();
+  if (!apiKey) {
+    throw new Error("OPEN_ROUTER_API is missing.");
+  }
+
+  const model = process.env.OPEN_ROUTER_MODEL?.trim() || "openai/gpt-4o-mini";
+  const referer = process.env.OPEN_ROUTER_REFERER?.trim() || "http://localhost:3000";
+  const title = process.env.OPEN_ROUTER_APP_NAME?.trim() || "Conflict Tracker";
+
+  const body = {
+    model,
+    temperature: 0.15,
+    top_p: 0.9,
+    response_format: { type: "json_object" },
+    messages: [
+      {
+        role: "system",
+        content:
+          "You are an intelligence analyst for a live US-Iran conflict monitoring desk. Prioritize US-linked strikes, retaliatory actions, and direct military exchanges involving Iran. Be explicit about uncertainty. Return JSON only.",
+      },
+      {
+        role: "user",
+        content: [
+          `Language code for all output: ${language}.`,
+          "Treat social-only claims as unverified.",
+          "Prioritize high-confidence and recently updated events.",
+          "Return strictly this JSON shape: { headline, executiveSummary, keyDevelopments[2-6], assessedRisks[2-6], monitoringGaps[2-6], recommendedChecks[2-6], confidenceNote }.",
+          "Data snapshot:",
+          JSON.stringify(payload),
+        ].join("\n"),
+      },
+    ],
+  };
+
+  const response = await fetch(ROUTER_API_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": referer,
+      "X-Title": title,
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(`OpenRouter HTTP ${response.status}: ${message.slice(0, 260)}`);
+  }
+
+  const json = (await response.json()) as {
+    choices?: Array<{
+      message?: {
+        content?: string;
+      };
+    }>;
+  };
+
+  const content = json.choices?.[0]?.message?.content?.trim();
+  if (!content) {
+    throw new Error("OpenRouter response did not include message content.");
+  }
+
+  const parsedObject = JSON.parse(extractJSONObject(content));
+  const analysis = analysisSchema.parse(parsedObject);
+
+  return {
+    analysis,
+    model,
   };
 }
 
@@ -186,30 +286,14 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  const model = process.env.AI_SUMMARY_MODEL ?? "openai/gpt-4.1-mini";
-
   try {
-    const result = await generateObject({
-      model,
-      schema: analysisSchema,
-      system:
-        "You are an intelligence analyst for a live US-Iran conflict monitoring dashboard. Prioritize US-linked strikes, retaliatory actions, and direct military exchanges involving Iran across global theaters (Iran, Iraq, Syria, Yemen, Lebanon, Red Sea, Gulf). Be explicit about uncertainty, avoid speculation, and keep claims tied to provided inputs.",
-      prompt: [
-        `Write all output in language code: ${targetLang}.`,
-        "Treat social-only claims as unverified.",
-        "Prioritize US-linked strike and attack relevance first.",
-        "Highlight escalation and de-escalation signals tied to US-Iran conflict dynamics across global locations.",
-        "Prioritize operationally useful analysis over narrative writing.",
-        "Data snapshot:",
-        JSON.stringify(payload),
-      ].join("\n"),
-    });
+    const result = await callOpenRouter(payload, targetLang);
 
     return NextResponse.json({
-      analysis: result.object,
+      analysis: result.analysis,
       generatedAt: Date.now(),
       mode: "ai",
-      model,
+      model: result.model,
     });
   } catch (error) {
     return NextResponse.json({

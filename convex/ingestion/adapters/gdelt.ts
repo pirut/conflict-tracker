@@ -1,10 +1,8 @@
 "use node";
 
 import {
-  CONFLICT_RELEVANCE_TERMS,
   GLOBAL_US_IRAN_LOCATION_TERMS,
-  IRAN_RELEVANCE_TERMS,
-  NEWS_QUERY_KEYWORDS,
+  TRUSTED_NEWS_DOMAINS,
 } from "../../constants";
 import { extractKeywords } from "../../lib/categorize";
 import { EventCategory } from "../../types";
@@ -16,15 +14,16 @@ import {
   extractCredibilityWeight,
   fetchJson,
   fetchText,
+  hostnameFromUrl,
+  isFreshNewsTimestamp,
   isRelevantIranConflictNews,
+  isTrustedNewsUrl,
   parseTimestamp,
 } from "./shared";
 
 type GdeltArticle = {
   title?: string;
   seendate?: string;
-  socialimage?: string;
-  sourcecountry?: string;
   domain?: string;
   language?: string;
   url?: string;
@@ -35,89 +34,18 @@ type GdeltResponse = {
   articles?: GdeltArticle[];
 };
 
-type NewsApiArticle = {
-  title?: string;
-  description?: string;
-  content?: string;
-  publishedAt?: string;
-  url?: string;
-  source?: { name?: string };
-};
-
-type NewsApiResponse = {
-  articles?: NewsApiArticle[];
-};
-
 type GuardianResponse = {
   response?: {
     results?: Array<{
       webTitle?: string;
       webPublicationDate?: string;
       webUrl?: string;
-      sectionName?: string;
       fields?: {
         trailText?: string;
         bodyText?: string;
       };
     }>;
   };
-};
-
-type GNewsResponse = {
-  articles?: Array<{
-    title?: string;
-    description?: string;
-    content?: string;
-    url?: string;
-    publishedAt?: string;
-    source?: { name?: string };
-  }>;
-};
-
-type MediaStackResponse = {
-  data?: Array<{
-    title?: string;
-    description?: string;
-    url?: string;
-    source?: string;
-    published_at?: string;
-    language?: string;
-  }>;
-};
-
-type NytResponse = {
-  response?: {
-    docs?: Array<{
-      abstract?: string;
-      snippet?: string;
-      web_url?: string;
-      pub_date?: string;
-      source?: string;
-      headline?: { main?: string };
-    }>;
-  };
-};
-
-type NewsDataResponse = {
-  results?: Array<{
-    title?: string;
-    description?: string;
-    link?: string;
-    pubDate?: string;
-    source_id?: string;
-    language?: string;
-  }>;
-};
-
-type TheNewsApiResponse = {
-  data?: Array<{
-    title?: string;
-    description?: string;
-    url?: string;
-    published_at?: string;
-    source?: string;
-    language?: string;
-  }>;
 };
 
 type NewsCandidate = {
@@ -133,6 +61,7 @@ type NewsCandidate = {
 const PREFERRED_NEWS_LANGUAGE = process.env.PREFERRED_NEWS_LANGUAGE ?? "en";
 const INCLUDE_NON_ENGLISH = (process.env.INCLUDE_NON_ENGLISH_NEWS ?? "false") === "true";
 const FOCUS_US_IRAN = (process.env.FOCUS_US_IRAN ?? "true") === "true";
+const STRICT_TRUSTED_NEWS = (process.env.STRICT_TRUSTED_NEWS ?? "true") === "true";
 
 const RSS_FEEDS: Array<{
   sourceName: string;
@@ -159,38 +88,44 @@ const RSS_FEEDS: Array<{
     url: "https://www.theguardian.com/world/rss",
     language: "en",
   },
+  {
+    sourceName: "Reuters World RSS",
+    url: "https://feeds.reuters.com/reuters/worldNews",
+    language: "en",
+  },
 ];
 
 function buildNewsQuery(): string {
-  if (FOCUS_US_IRAN) {
-    const locationClause = GLOBAL_US_IRAN_LOCATION_TERMS.map((term) =>
-      term.includes(" ") ? `"${term}"` : term,
-    ).join(" OR ");
+  const locationClause = GLOBAL_US_IRAN_LOCATION_TERMS.map((term) =>
+    term.includes(" ") ? `"${term}"` : term,
+  ).join(" OR ");
 
-    return [
-      `(${locationClause})`,
-      '("united states" OR "u.s." OR us OR american OR pentagon OR centcom OR "us military")',
-      '(strike OR airstrike OR explosion OR attack OR missile OR drone OR "air defense" OR bombardment OR retaliatory)',
-    ].join(" AND ");
+  const conflictClause = [
+    "strike",
+    "airstrike",
+    "attack",
+    "missile",
+    "drone",
+    "retaliation",
+    "explosion",
+    "intercept",
+    "military",
+  ].join(" OR ");
+
+  if (FOCUS_US_IRAN) {
+    const usClause = [
+      '"united states"',
+      '"u.s."',
+      "american",
+      "pentagon",
+      "centcom",
+      '"us military"',
+    ].join(" OR ");
+
+    return [`(${locationClause})`, `(${conflictClause})`, `(${usClause})`].join(" AND ");
   }
 
-  const geoTerms = NEWS_QUERY_KEYWORDS.filter((keyword) =>
-    IRAN_RELEVANCE_TERMS.some((term) => keyword.toLowerCase().includes(term)),
-  );
-  const conflictTerms = NEWS_QUERY_KEYWORDS.filter((keyword) =>
-    CONFLICT_RELEVANCE_TERMS.some((term) => keyword.toLowerCase().includes(term)),
-  );
-
-  const mapKeyword = (keyword: string) => (keyword.includes(" ") ? `"${keyword}"` : keyword);
-
-  const geo = (geoTerms.length > 0 ? geoTerms : NEWS_QUERY_KEYWORDS)
-    .map(mapKeyword)
-    .join(" OR ");
-  const incident = (conflictTerms.length > 0 ? conflictTerms : NEWS_QUERY_KEYWORDS)
-    .map(mapKeyword)
-    .join(" OR ");
-
-  return `(${geo}) AND (${incident})`;
+  return [`(${locationClause})`, `(${conflictClause})`].join(" AND ");
 }
 
 function decodeXmlText(input: string | undefined): string | undefined {
@@ -291,63 +226,6 @@ function parseRssCandidates(
   return items;
 }
 
-function normalizeNewsCandidate(candidate: NewsCandidate, now: number): NormalizedIngestItem | null {
-  const title = candidate.title?.trim();
-  if (!title) {
-    return null;
-  }
-
-  const summary =
-    candidate.summary?.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() ||
-    title;
-
-  const normalizedLanguage = normalizeLanguageCode(candidate.language);
-  if (!INCLUDE_NON_ENGLISH && normalizedLanguage && normalizedLanguage !== PREFERRED_NEWS_LANGUAGE) {
-    return null;
-  }
-
-  if (!isRelevantIranConflictNews(title, summary)) {
-    return null;
-  }
-
-  const category = detectCategoryFromText(`${title} ${summary}`) as EventCategory;
-  const place = derivePlace(`${title} ${summary}`);
-  const intel = buildNewsIntelligence({
-    title,
-    summary,
-    sourceName: candidate.sourceName,
-    url: candidate.url,
-  });
-
-  return {
-    sourceType: "news",
-    sourceName: candidate.sourceName,
-    url: candidate.url,
-    publishedTs: parseTimestamp(candidate.publishedAt, now),
-    fetchedTs: now,
-    title,
-    summary,
-    category,
-    lat: place.lat,
-    lon: place.lon,
-    placeName: place.placeName,
-    country: place.country,
-    keywords: extractKeywords(`${title} ${summary}`),
-    credibilityWeight: extractCredibilityWeight(candidate.url),
-    rawJson: {
-      ...candidate.raw,
-      relevanceScore: intel.relevanceScore,
-      usIranWarScore: intel.usIranWarScore,
-      isUSLinked: intel.isUSLinked,
-      originalLanguage: candidate.language,
-      normalizedLanguage,
-    },
-    isGeoPrecise: place.isGeoPrecise,
-    whatWeKnow: intel.whatWeKnow,
-    whatWeDontKnow: intel.whatWeDontKnow,
-  };
-}
-
 function normalizeLanguageCode(input?: string): string | undefined {
   if (!input) {
     return undefined;
@@ -374,11 +252,76 @@ function normalizeLanguageCode(input?: string): string | undefined {
     es: "es",
   };
 
-  if (aliases[lang]) {
-    return aliases[lang];
+  return aliases[lang] ?? lang.slice(0, 2);
+}
+
+function normalizeNewsCandidate(candidate: NewsCandidate, now: number): NormalizedIngestItem | null {
+  const title = candidate.title?.trim();
+  if (!title) {
+    return null;
   }
 
-  return lang.slice(0, 2);
+  const summary =
+    candidate.summary?.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() ||
+    title;
+
+  const normalizedLanguage = normalizeLanguageCode(candidate.language);
+  if (!INCLUDE_NON_ENGLISH && normalizedLanguage && normalizedLanguage !== PREFERRED_NEWS_LANGUAGE) {
+    return null;
+  }
+
+  if (!isRelevantIranConflictNews(title, summary)) {
+    return null;
+  }
+
+  const publishedTs = parseTimestamp(candidate.publishedAt, now);
+  if (!isFreshNewsTimestamp(publishedTs, now)) {
+    return null;
+  }
+
+  if (STRICT_TRUSTED_NEWS && !isTrustedNewsUrl(candidate.url)) {
+    return null;
+  }
+
+  const category = detectCategoryFromText(`${title} ${summary}`) as EventCategory;
+  const place = derivePlace(`${title} ${summary}`);
+  const intel = buildNewsIntelligence({
+    title,
+    summary,
+    sourceName: candidate.sourceName,
+    url: candidate.url,
+  });
+
+  const host = hostnameFromUrl(candidate.url) ?? "unknown";
+
+  return {
+    sourceType: "news",
+    sourceName: candidate.sourceName,
+    url: candidate.url,
+    publishedTs,
+    fetchedTs: now,
+    title,
+    summary,
+    category,
+    lat: place.lat,
+    lon: place.lon,
+    placeName: place.placeName,
+    country: place.country,
+    keywords: extractKeywords(`${title} ${summary}`),
+    credibilityWeight: extractCredibilityWeight(candidate.url),
+    rawJson: {
+      ...candidate.raw,
+      relevanceScore: intel.relevanceScore,
+      usIranWarScore: intel.usIranWarScore,
+      isUSLinked: intel.isUSLinked,
+      originalLanguage: candidate.language,
+      normalizedLanguage,
+      host,
+    },
+    isGeoPrecise: place.isGeoPrecise,
+    whatWeKnow: intel.whatWeKnow,
+    whatWeDontKnow: intel.whatWeDontKnow,
+  };
 }
 
 async function fetchGdeltCandidates(query: string): Promise<NewsCandidate[]> {
@@ -443,161 +386,12 @@ async function fetchGuardianCandidates(query: string): Promise<NewsCandidate[]> 
   }));
 }
 
-async function fetchNewsApiCandidates(query: string): Promise<NewsCandidate[]> {
-  const apiKey = process.env.NEWSAPI_KEY;
-  if (!apiKey) {
-    return [];
-  }
-
-  const url = new URL("https://newsapi.org/v2/everything");
-  url.searchParams.set("q", query);
-  url.searchParams.set("language", PREFERRED_NEWS_LANGUAGE);
-  url.searchParams.set("sortBy", "publishedAt");
-  url.searchParams.set("pageSize", "40");
-
-  const response = await fetchJson<NewsApiResponse>(url.toString(), {
-    headers: { "X-Api-Key": apiKey },
-  });
-
-  return (response.articles ?? []).map((article) => ({
-    sourceName: article.source?.name ?? "NewsAPI",
-    title: article.title,
-    summary: article.description ?? article.content,
-    url: article.url,
-    publishedAt: article.publishedAt,
-    language: PREFERRED_NEWS_LANGUAGE,
-    raw: article as unknown as Record<string, unknown>,
-  }));
-}
-
-async function fetchGNewsCandidates(query: string): Promise<NewsCandidate[]> {
-  const apiKey = process.env.GNEWS_API_KEY;
-  if (!apiKey) {
-    return [];
-  }
-
-  const url = new URL("https://gnews.io/api/v4/search");
-  url.searchParams.set("q", query);
-  url.searchParams.set("lang", PREFERRED_NEWS_LANGUAGE);
-  url.searchParams.set("max", "20");
-  url.searchParams.set("sortby", "publishedAt");
-  url.searchParams.set("apikey", apiKey);
-
-  const response = await fetchJson<GNewsResponse>(url.toString());
-  return (response.articles ?? []).map((article) => ({
-    sourceName: article.source?.name ?? "GNews",
-    title: article.title,
-    summary: article.description ?? article.content,
-    url: article.url,
-    publishedAt: article.publishedAt,
-    language: PREFERRED_NEWS_LANGUAGE,
-    raw: article as unknown as Record<string, unknown>,
-  }));
-}
-
-async function fetchMediaStackCandidates(query: string): Promise<NewsCandidate[]> {
-  const apiKey = process.env.MEDIASTACK_API_KEY;
-  if (!apiKey) {
-    return [];
-  }
-
-  const url = new URL("http://api.mediastack.com/v1/news");
-  url.searchParams.set("access_key", apiKey);
-  url.searchParams.set("languages", PREFERRED_NEWS_LANGUAGE);
-  url.searchParams.set("sort", "published_desc");
-  url.searchParams.set("limit", "50");
-  url.searchParams.set("keywords", query.replace(/[()\"]/g, ""));
-
-  const response = await fetchJson<MediaStackResponse>(url.toString());
-  return (response.data ?? []).map((article) => ({
-    sourceName: article.source ?? "MediaStack",
-    title: article.title,
-    summary: article.description,
-    url: article.url,
-    publishedAt: article.published_at,
-    language: article.language,
-    raw: article as unknown as Record<string, unknown>,
-  }));
-}
-
-async function fetchNytCandidates(query: string): Promise<NewsCandidate[]> {
-  const apiKey = process.env.NYTIMES_API_KEY;
-  if (!apiKey) {
-    return [];
-  }
-
-  const url = new URL("https://api.nytimes.com/svc/search/v2/articlesearch.json");
-  url.searchParams.set("q", query.replace(/[()\"]/g, " "));
-  url.searchParams.set("sort", "newest");
-  url.searchParams.set("api-key", apiKey);
-
-  const response = await fetchJson<NytResponse>(url.toString());
-  return (response.response?.docs ?? []).map((article) => ({
-    sourceName: article.source ?? "New York Times",
-    title: article.headline?.main,
-    summary: article.abstract ?? article.snippet,
-    url: article.web_url,
-    publishedAt: article.pub_date,
-    language: "en",
-    raw: article as unknown as Record<string, unknown>,
-  }));
-}
-
-async function fetchNewsDataCandidates(query: string): Promise<NewsCandidate[]> {
-  const apiKey = process.env.NEWSDATA_API_KEY;
-  if (!apiKey) {
-    return [];
-  }
-
-  const url = new URL("https://newsdata.io/api/1/news");
-  url.searchParams.set("apikey", apiKey);
-  url.searchParams.set("q", query.replace(/[()"]/g, " "));
-  url.searchParams.set("language", PREFERRED_NEWS_LANGUAGE);
-  url.searchParams.set("size", "40");
-
-  const response = await fetchJson<NewsDataResponse>(url.toString());
-  return (response.results ?? []).map((article) => ({
-    sourceName: article.source_id ?? "NewsData",
-    title: article.title,
-    summary: article.description,
-    url: article.link,
-    publishedAt: article.pubDate,
-    language: article.language,
-    raw: article as unknown as Record<string, unknown>,
-  }));
-}
-
-async function fetchTheNewsApiCandidates(query: string): Promise<NewsCandidate[]> {
-  const apiKey = process.env.THENEWSAPI_KEY;
-  if (!apiKey) {
-    return [];
-  }
-
-  const url = new URL("https://api.thenewsapi.com/v1/news/all");
-  url.searchParams.set("api_token", apiKey);
-  url.searchParams.set("search", query.replace(/[()"]/g, " "));
-  url.searchParams.set("language", PREFERRED_NEWS_LANGUAGE);
-  url.searchParams.set("sort", "published_at");
-  url.searchParams.set("limit", "40");
-
-  const response = await fetchJson<TheNewsApiResponse>(url.toString());
-  return (response.data ?? []).map((article) => ({
-    sourceName: article.source ?? "TheNewsAPI",
-    title: article.title,
-    summary: article.description,
-    url: article.url,
-    publishedAt: article.published_at,
-    language: article.language,
-    raw: article as unknown as Record<string, unknown>,
-  }));
-}
-
 async function fetchRssCandidates(): Promise<NewsCandidate[]> {
   const runs = await Promise.allSettled(
     RSS_FEEDS.map(async (feed) => {
       const xml = await fetchText(feed.url, {
         headers: {
-          "User-Agent": "conflict-tracker/1.0",
+          "User-Agent": "conflict-tracker/2.0",
           Accept: "application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8",
         },
       });
@@ -618,46 +412,65 @@ function dedupeNews(items: NormalizedIngestItem[]): NormalizedIngestItem[] {
   const map = new Map<string, NormalizedIngestItem>();
 
   for (const item of items) {
-    const key = item.url ? `url:${item.url}` : `${item.sourceName}:${item.title}:${item.publishedTs}`;
+    const normalizedTitle = item.title.toLowerCase().replace(/[^a-z0-9\s]/g, "").trim();
+    const key = item.url
+      ? `url:${item.url}`
+      : `${item.sourceName}:${normalizedTitle}:${Math.floor(item.publishedTs / (30 * 60 * 1000))}`;
+
     if (!map.has(key)) {
+      map.set(key, item);
+      continue;
+    }
+
+    const existing = map.get(key)!;
+    if (item.credibilityWeight > existing.credibilityWeight) {
       map.set(key, item);
     }
   }
 
   return [...map.values()]
-    .sort((a, b) => b.publishedTs - a.publishedTs)
-    .slice(0, 180);
+    .sort((a, b) => {
+      const aUS = Number(a.rawJson?.usIranWarScore ?? 0);
+      const bUS = Number(b.rawJson?.usIranWarScore ?? 0);
+      return bUS - aUS || b.credibilityWeight - a.credibilityWeight || b.publishedTs - a.publishedTs;
+    })
+    .slice(0, 220);
+}
+
+function sourceHealthWarnings(items: NormalizedIngestItem[]): string[] {
+  if (items.length === 0) {
+    return [
+      "News adapters returned 0 accepted items after strict filtering. Consider widening query or disabling STRICT_TRUSTED_NEWS.",
+    ];
+  }
+
+  const hostCounts = new Map<string, number>();
+  for (const item of items) {
+    const host = hostnameFromUrl(item.url) ?? "unknown";
+    hostCounts.set(host, (hostCounts.get(host) ?? 0) + 1);
+  }
+
+  const dominantHost = [...hostCounts.entries()].sort((a, b) => b[1] - a[1])[0];
+  if (dominantHost && dominantHost[1] >= Math.max(8, Math.floor(items.length * 0.7))) {
+    return [`Source concentration warning: ${dominantHost[0]} contributed ${dominantHost[1]} of ${items.length} accepted news rows.`];
+  }
+
+  return [];
 }
 
 export async function fetchGdeltNews(context: AdapterContext): Promise<IngestionAdapterResult> {
   const now = context.now;
-  const warnings: string[] = [];
   const query = buildNewsQuery();
+  const warnings: string[] = [];
 
   const candidateRuns = await Promise.allSettled([
     fetchGdeltCandidates(query),
     fetchGuardianCandidates(query),
-    fetchNewsApiCandidates(query),
-    fetchGNewsCandidates(query),
-    fetchMediaStackCandidates(query),
-    fetchNytCandidates(query),
-    fetchNewsDataCandidates(query),
-    fetchTheNewsApiCandidates(query),
     fetchRssCandidates(),
   ]);
 
   const candidates: NewsCandidate[] = [];
-  const sourceNames = [
-    "GDELT",
-    "Guardian",
-    "NewsAPI",
-    "GNews",
-    "MediaStack",
-    "NYTimes",
-    "NewsData",
-    "TheNewsAPI",
-    "RSS",
-  ];
+  const sourceNames = ["GDELT", "Guardian", "RSS"];
 
   candidateRuns.forEach((result, index) => {
     if (result.status === "fulfilled") {
@@ -672,6 +485,22 @@ export async function fetchGdeltNews(context: AdapterContext): Promise<Ingestion
     .filter((item): item is NormalizedIngestItem => item !== null);
 
   const items = dedupeNews(mapped);
+  warnings.push(...sourceHealthWarnings(items));
+
+  const trustedCoverage = new Set(
+    items
+      .map((item) => hostnameFromUrl(item.url))
+      .filter((host): host is string => Boolean(host)),
+  );
+
+  if (trustedCoverage.size > 0) {
+    const unknownTrusted = [...trustedCoverage].filter(
+      (host) => !TRUSTED_NEWS_DOMAINS.some((trusted) => host === trusted || host.endsWith(`.${trusted}`)),
+    );
+    if (unknownTrusted.length > 0) {
+      warnings.push(`Accepted items included domains outside trusted list: ${unknownTrusted.slice(0, 6).join(", ")}`);
+    }
+  }
 
   return {
     items,
