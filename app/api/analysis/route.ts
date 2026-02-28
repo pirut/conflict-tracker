@@ -55,6 +55,15 @@ type AnalysisShape = z.infer<typeof analysisSchema>;
 
 const ROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
 
+class OpenRouterError extends Error {
+  status?: number;
+  constructor(message: string, status?: number) {
+    super(message);
+    this.name = "OpenRouterError";
+    this.status = status;
+  }
+}
+
 function normalizeLang(language?: string): string {
   if (!language) {
     return "en";
@@ -200,13 +209,12 @@ function extractJSONObject(input: string): string {
 async function callOpenRouter(
   payload: ReturnType<typeof sanitizeRequest>,
   language: string,
+  model: string,
 ): Promise<{ analysis: AnalysisShape; model: string }> {
   const apiKey = process.env.OPEN_ROUTER_API?.trim();
   if (!apiKey) {
     throw new Error("OPEN_ROUTER_API is missing.");
   }
-
-  const model = process.env.OPEN_ROUTER_MODEL?.trim() || "openai/gpt-4o-mini";
   const referer = process.env.OPEN_ROUTER_REFERER?.trim() || "http://localhost:3000";
   const title = process.env.OPEN_ROUTER_APP_NAME?.trim() || "Conflict Tracker";
 
@@ -248,7 +256,10 @@ async function callOpenRouter(
 
   if (!response.ok) {
     const message = await response.text();
-    throw new Error(`OpenRouter HTTP ${response.status}: ${message.slice(0, 260)}`);
+    throw new OpenRouterError(
+      `OpenRouter HTTP ${response.status}: ${message.slice(0, 260)}`,
+      response.status,
+    );
   }
 
   const json = (await response.json()) as {
@@ -273,6 +284,39 @@ async function callOpenRouter(
   };
 }
 
+function resolveOpenRouterModels(): string[] {
+  const primary = process.env.OPEN_ROUTER_MODEL?.trim() || "openai/gpt-4o-mini";
+  const fallbackRaw = process.env.OPEN_ROUTER_MODEL_FALLBACKS ?? "";
+
+  const models = [
+    primary,
+    ...fallbackRaw
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean),
+  ];
+
+  return [...new Set(models)];
+}
+
+function shouldTryNextModel(error: unknown): boolean {
+  if (!(error instanceof OpenRouterError)) {
+    return true;
+  }
+
+  if (error.status === 429 || error.status === 408 || (error.status ?? 0) >= 500) {
+    return true;
+  }
+
+  const message = error.message.toLowerCase();
+  return (
+    message.includes("rate") ||
+    message.includes("quota") ||
+    message.includes("capacity") ||
+    message.includes("overloaded")
+  );
+}
+
 export async function POST(request: NextRequest) {
   const body = (await request.json()) as AnalysisRequest;
   const targetLang = normalizeLang(body.language);
@@ -286,21 +330,31 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  try {
-    const result = await callOpenRouter(payload, targetLang);
+  const models = resolveOpenRouterModels();
+  const errors: string[] = [];
 
-    return NextResponse.json({
-      analysis: result.analysis,
-      generatedAt: Date.now(),
-      mode: "ai",
-      model: result.model,
-    });
-  } catch (error) {
-    return NextResponse.json({
-      analysis: fallbackAnalysis(payload),
-      generatedAt: Date.now(),
-      mode: "fallback",
-      error: (error as Error).message,
-    });
+  for (const model of models) {
+    try {
+      const result = await callOpenRouter(payload, targetLang, model);
+
+      return NextResponse.json({
+        analysis: result.analysis,
+        generatedAt: Date.now(),
+        mode: "ai",
+        model: result.model,
+      });
+    } catch (error) {
+      errors.push(`${model}: ${(error as Error).message}`);
+      if (!shouldTryNextModel(error)) {
+        break;
+      }
+    }
   }
+
+  return NextResponse.json({
+    analysis: fallbackAnalysis(payload),
+    generatedAt: Date.now(),
+    mode: "fallback",
+    error: errors.join(" | ").slice(0, 1200),
+  });
 }

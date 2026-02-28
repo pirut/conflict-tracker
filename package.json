@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "env:sync:vercel-convex": "node scripts/sync-vercel-env-to-convex.mjs",
+    "data:wipe-reingest": "npx convex run admin:wipeOldDataAndReingest '{\"confirm\":\"WIPE_AND_REINGEST\",\"purgeAlerts\":false,\"includeSocial\":true}'"
   },
   "dependencies": {
     "ai": "^6.0.105",

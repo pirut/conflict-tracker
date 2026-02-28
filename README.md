@@ -49,6 +49,7 @@ cp .env.example .env.local
 
 - `OPEN_ROUTER_API`
 - `OPEN_ROUTER_MODEL` (default: `openai/gpt-4o-mini`)
+- `OPEN_ROUTER_MODEL_FALLBACKS` (optional comma-separated list for automatic retry on rate limits/outages)
 
 If `OPEN_ROUTER_API` is missing or OpenRouter fails, the app falls back to deterministic local synthesis.
 
@@ -94,4 +95,34 @@ Defined in [`convex/crons.ts`](./convex/crons.ts):
 ```bash
 npm run lint
 npm run build
+```
+
+## Operations
+
+### Sync Vercel env vars into Convex
+
+This pulls Vercel `development`, `preview`, and `production` env vars and syncs them to Convex (production values win on key conflicts):
+
+```bash
+npm run env:sync:vercel-convex
+```
+
+Optional: pass specific environments:
+
+```bash
+node scripts/sync-vercel-env-to-convex.mjs production
+```
+
+### Wipe old data and reingest fresh
+
+This purges legacy ingestion rows in batches and immediately runs ingestion again:
+
+```bash
+npm run data:wipe-reingest
+```
+
+Direct Convex call:
+
+```bash
+npx convex run admin:wipeOldDataAndReingest '{"confirm":"WIPE_AND_REINGEST","purgeAlerts":false,"includeSocial":true}'
 ```
