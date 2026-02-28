@@ -17,7 +17,7 @@ import { SignalsPanel } from "./signals-panel";
 
 const DEFAULT_FILTERS: DashboardFilters = {
   timeRangeHours: 24,
-  minConfidence: 0,
+  minConfidence: 35,
   category: "all",
   q: "",
   sourceTypes: {
@@ -26,6 +26,31 @@ const DEFAULT_FILTERS: DashboardFilters = {
     social: true,
   },
 };
+
+function warFocusScore(event: DashboardEvent): number {
+  const text = `${event.title} ${event.summary}`.toLowerCase();
+  const usTerms = ["united states", "u.s.", "us ", "us-", "pentagon", "centcom", "american"];
+  const iranTerms = ["iran", "tehran", "isfahan", "natanz", "qom", "tabriz"];
+  const strikeTerms = ["strike", "airstrike", "attack", "missile", "drone", "bombard", "retaliat"];
+
+  const count = (terms: string[]) => terms.reduce((acc, term) => acc + (text.includes(term) ? 1 : 0), 0);
+  const us = count(usTerms);
+  const iran = count(iranTerms);
+  const strike = count(strikeTerms);
+  return us * 3 + iran * 2 + strike * 2 + (us > 0 && iran > 0 ? 4 : 0);
+}
+
+function isUSLinkedStrike(event: DashboardEvent): boolean {
+  const strikeCategories = new Set([
+    "strike",
+    "missile",
+    "drone",
+    "explosion",
+    "air_defense",
+    "military_base",
+  ]);
+  return warFocusScore(event) >= 6 && strikeCategories.has(event.category);
+}
 
 export function DashboardPage() {
   const [filters, setFilters] = useState<DashboardFilters>(DEFAULT_FILTERS);
@@ -78,6 +103,13 @@ export function DashboardPage() {
   }) as NotificationItem[] | undefined;
 
   const events = useMemo(() => eventsQuery ?? [], [eventsQuery]);
+  const prioritizedEvents = useMemo(() => {
+    return [...events].sort((a, b) => {
+      const aScore = warFocusScore(a);
+      const bScore = warFocusScore(b);
+      return bScore - aScore || b.confidence - a.confidence || b.eventTs - a.eventTs;
+    });
+  }, [events]);
   const connectivitySignals = useMemo(
     () => connectivitySignalsQuery ?? [],
     [connectivitySignalsQuery],
@@ -91,6 +123,9 @@ export function DashboardPage() {
     const texts: string[] = [
       "event",
       "events",
+      "US-Iran Global Conflict Monitor",
+      "Ongoing US-Iran Strikes, Attacks, and Escalation Signals Worldwide",
+      "Prioritized tracking of US-linked strikes and attacks across Iran, Iraq, Syria, Yemen, Lebanon, Red Sea, and other theaters.",
       "Unverified",
       "UNVERIFIED",
       "UTC",
@@ -104,8 +139,11 @@ export function DashboardPage() {
       "keyword or location",
       "Live clustering, confidence scoring, corroboration-aware event stream.",
       "high-confidence events in current window",
+      "US-linked strike events in current window",
       "Latest update",
       "Source mix",
+      "US-linked strikes",
+      "Latest US-linked",
       "No sudden flight drops detected in this window.",
       "No hotspot rows yet for selected window.",
       "No notifications yet.",
@@ -132,7 +170,7 @@ export function DashboardPage() {
       "Updated",
     ];
 
-    for (const event of events.slice(0, 40)) {
+    for (const event of prioritizedEvents.slice(0, 40)) {
       texts.push(event.title, event.summary, event.placeName);
       texts.push(...event.whatWeKnow.slice(0, 3));
       texts.push(...event.whatWeDontKnow.slice(0, 3));
@@ -162,9 +200,9 @@ export function DashboardPage() {
     }
 
     return Array.from(new Set(texts.filter(Boolean)));
-  }, [events, connectivitySignals, flightSignals, firmsSignals, notifications]);
+  }, [prioritizedEvents, connectivitySignals, flightSignals, firmsSignals, notifications]);
 
-  const { translateText } = useEventTranslation(events, activeLanguage, translationSeedTexts);
+  const { translateText } = useEventTranslation(prioritizedEvents, activeLanguage, translationSeedTexts);
   const copy = useMemo(
     () => (key: string, fallback: string) => uiCopy(activeLanguage, key, fallback),
     [activeLanguage],
@@ -176,43 +214,51 @@ export function DashboardPage() {
       signals: 0,
       social: 0,
     };
-    for (const event of events) {
+    for (const event of prioritizedEvents) {
       if (event.sourceTypes.includes("news")) mix.news += 1;
       if (event.sourceTypes.includes("signals")) mix.signals += 1;
       if (event.sourceTypes.includes("social")) mix.social += 1;
     }
     return mix;
-  }, [events]);
+  }, [prioritizedEvents]);
 
   const topLocations = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const event of events) {
+    for (const event of prioritizedEvents) {
       counts.set(event.placeName, (counts.get(event.placeName) ?? 0) + 1);
     }
     return [...counts.entries()]
       .sort((a, b) => b[1] - a[1])
       .slice(0, 4);
-  }, [events]);
+  }, [prioritizedEvents]);
 
   const topCategories = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const event of events) {
+    for (const event of prioritizedEvents) {
       counts.set(event.category, (counts.get(event.category) ?? 0) + 1);
     }
     return [...counts.entries()]
       .sort((a, b) => b[1] - a[1])
       .slice(0, 4);
-  }, [events]);
+  }, [prioritizedEvents]);
 
   const highConfidenceCount = useMemo(
-    () => events.filter((event) => event.confidence >= 75).length,
-    [events],
+    () => prioritizedEvents.filter((event) => event.confidence >= 75).length,
+    [prioritizedEvents],
   );
-  const latestEventTs = events[0]?.eventTs;
+  const usLinkedStrikeCount = useMemo(
+    () => prioritizedEvents.filter((event) => isUSLinkedStrike(event)).length,
+    [prioritizedEvents],
+  );
+  const latestEventTs = prioritizedEvents[0]?.eventTs;
+  const latestUSLinkedTs = useMemo(
+    () => prioritizedEvents.find((event) => isUSLinkedStrike(event))?.eventTs,
+    [prioritizedEvents],
+  );
 
   const selectedEvent = useMemo(
-    () => events.find((event) => event._id === selectedEventId) ?? null,
-    [events, selectedEventId],
+    () => prioritizedEvents.find((event) => event._id === selectedEventId) ?? null,
+    [prioritizedEvents, selectedEventId],
   );
 
   return (
@@ -221,16 +267,13 @@ export function DashboardPage() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <p className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-slate-700">
-              <Radar className="h-3.5 w-3.5" /> {copy("dashboardTitle", "Iran Live Situation Dashboard")}
+              <Radar className="h-3.5 w-3.5" /> {translateText("US-Iran Global Conflict Monitor")}
             </p>
             <h1 className="mt-2 text-xl font-semibold text-slate-900 sm:text-2xl">
-              {copy(
-                "dashboardSubtitle",
-                "Confirmed News + Signals + Optional Social Intelligence",
-              )}
+              {translateText("Ongoing US-Iran Strikes, Attacks, and Escalation Signals Worldwide")}
             </h1>
             <p className="mt-1 text-sm text-slate-600">
-              {translateText("Live clustering, confidence scoring, corroboration-aware event stream.")}
+              {translateText("Prioritized tracking of US-linked strikes and attacks across Iran, Iraq, Syria, Yemen, Lebanon, Red Sea, and other theaters.")}
             </p>
           </div>
 
@@ -263,23 +306,24 @@ export function DashboardPage() {
             </p>
           </div>
           <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs">
-            <p className="uppercase tracking-wide text-slate-500">{translateText("High")}</p>
-            <p className="mt-1 text-lg font-semibold text-slate-900">{stats?.byLabel?.High ?? "..."}</p>
+            <p className="uppercase tracking-wide text-slate-500">{translateText("US-linked strikes")}</p>
+            <p className="mt-1 text-lg font-semibold text-slate-900">{usLinkedStrikeCount}</p>
           </div>
           <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs">
-            <p className="uppercase tracking-wide text-slate-500">{translateText("Medium")}</p>
-            <p className="mt-1 text-lg font-semibold text-slate-900">{stats?.byLabel?.Medium ?? "..."}</p>
+            <p className="uppercase tracking-wide text-slate-500">{translateText("High confidence")}</p>
+            <p className="mt-1 text-lg font-semibold text-slate-900">{highConfidenceCount}</p>
           </div>
           <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs">
-            <p className="uppercase tracking-wide text-slate-500">{translateText("Low")}</p>
-            <p className="mt-1 text-lg font-semibold text-slate-900">{stats?.byLabel?.Low ?? "..."}</p>
+            <p className="uppercase tracking-wide text-slate-500">{translateText("Latest US-linked")}</p>
+            <p className="mt-1 text-sm font-semibold text-slate-900">
+              {latestUSLinkedTs ? formatAgo(latestUSLinkedTs) : "..."}
+            </p>
           </div>
         </div>
       </header>
 
       <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-        {copy(
-          "disclaimer",
+        {translateText(
           "Signals and social reports may be incomplete or inaccurate. Confidence reflects corroboration, not certainty.",
         )}
       </div>
@@ -288,7 +332,7 @@ export function DashboardPage() {
         <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
           <p className="uppercase tracking-wide text-slate-500">{copy("intelligenceSnapshot", "Intelligence Snapshot")}</p>
           <p className="mt-1 text-sm font-semibold text-slate-900">
-            {highConfidenceCount} {translateText("high-confidence events in current window")}
+            {usLinkedStrikeCount} {translateText("US-linked strike events in current window")}
           </p>
           <p className="mt-1 text-slate-500">
             {translateText("Latest update")}: {latestEventTs ? formatAgo(latestEventTs) : "..."}
@@ -336,7 +380,7 @@ export function DashboardPage() {
       <FiltersBar filters={filters} onChange={setFilters} translateText={translateText} />
 
       <AIAnalysisPanel
-        events={events}
+        events={prioritizedEvents}
         connectivitySignals={connectivitySignals}
         flightSignals={flightSignals}
         firmsSignals={firmsSignals}
@@ -347,7 +391,7 @@ export function DashboardPage() {
       <section className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
         <div className="xl:col-span-4">
           <MapPanel
-            events={events}
+            events={prioritizedEvents}
             selectedEvent={selectedEvent}
             onSelectEvent={(event) => setSelectedEventId(event._id)}
             onCloseDrawer={() => setSelectedEventId(null)}
@@ -364,7 +408,7 @@ export function DashboardPage() {
 
         <div className="xl:col-span-4">
           <EventsTimeline
-            events={events}
+            events={prioritizedEvents}
             selectedEventId={selectedEventId}
             onSelect={(event) => setSelectedEventId(event._id)}
             translateText={translateText}

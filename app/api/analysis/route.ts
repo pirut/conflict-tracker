@@ -83,9 +83,49 @@ function sanitizeRequest(body: AnalysisRequest) {
   return { events, connectivity, flight, firms };
 }
 
+function usFocusScore(text: string): number {
+  const normalized = text.toLowerCase();
+  const usTerms = ["united states", "u.s.", "us ", "us-", "pentagon", "centcom", "american"];
+  const iranTerms = ["iran", "tehran", "isfahan", "natanz", "qom", "tabriz"];
+  const strikeTerms = ["strike", "airstrike", "attack", "missile", "drone", "bombardment", "retaliat"];
+
+  const count = (terms: string[]) => terms.reduce((acc, term) => acc + (normalized.includes(term) ? 1 : 0), 0);
+
+  const us = count(usTerms);
+  const iran = count(iranTerms);
+  const strike = count(strikeTerms);
+
+  return us * 3 + iran * 2 + strike * 2 + (us > 0 && iran > 0 ? 3 : 0);
+}
+
+function isUSLinkedStrikeEvent(event: {
+  title: string;
+  summary: string;
+  category: string;
+}) {
+  const merged = `${event.title} ${event.summary}`;
+  const score = usFocusScore(merged);
+  const strikeCategory = ["strike", "missile", "drone", "explosion", "air_defense", "military_base"].includes(
+    event.category,
+  );
+  return score >= 6 && strikeCategory;
+}
+
 function fallbackAnalysis(payload: ReturnType<typeof sanitizeRequest>) {
-  const topEvent = payload.events[0];
+  const ranked = [...payload.events].sort((a, b) => {
+    const aScore = usFocusScore(`${a.title} ${a.summary}`);
+    const bScore = usFocusScore(`${b.title} ${b.summary}`);
+    return bScore - aScore || b.confidence - a.confidence || b.eventTs - a.eventTs;
+  });
+  const topEvent = ranked[0];
   const highConfidence = payload.events.filter((event) => event.confidence >= 75).length;
+  const usLinkedStrikeCount = payload.events.filter((event) =>
+    isUSLinkedStrikeEvent({
+      title: event.title,
+      summary: event.summary,
+      category: event.category,
+    }),
+  ).length;
   const socialOnly = payload.events.filter(
     (event) =>
       event.sourceTypes.includes("social") &&
@@ -99,14 +139,15 @@ function fallbackAnalysis(payload: ReturnType<typeof sanitizeRequest>) {
 
   return {
     headline: topEvent
-      ? `Live brief: ${topEvent.category.replace(/_/g, " ")} activity around ${topEvent.placeName}`
-      : "Live brief: monitoring window active",
+      ? `US-Iran strike brief: ${topEvent.category.replace(/_/g, " ")} activity around ${topEvent.placeName}`
+      : "US-Iran strike brief: monitoring window active",
     executiveSummary:
       topEvent
-        ? `${payload.events.length} events in scope, with ${highConfidence} high-confidence clusters. Latest focal point: ${topEvent.placeName}.`
+        ? `${payload.events.length} events in scope, with ${usLinkedStrikeCount} US-linked strike events and ${highConfidence} high-confidence clusters. Latest focal point: ${topEvent.placeName}.`
         : "No event rows are currently available for AI synthesis.",
     keyDevelopments: [
       `${payload.events.length} events processed for this window.`,
+      `${usLinkedStrikeCount} events match US-Iran strike criteria.`,
       `${highConfidence} events are currently tagged high confidence.`,
       `${flightAnomalies} flight anomaly signals and ${lowConnectivity} low-connectivity rows are present.`,
     ],
@@ -123,7 +164,7 @@ function fallbackAnalysis(payload: ReturnType<typeof sanitizeRequest>) {
       "Some data providers may throttle or delay updates during high-volume periods.",
     ],
     recommendedChecks: [
-      "Track changes in high-confidence clusters over the next 30-60 minutes.",
+      "Track US-linked strike clusters over the next 30-60 minutes.",
       "Cross-check social-only claims against trusted news and signal corroboration.",
       "Verify whether connectivity and flight anomalies persist across multiple snapshots.",
     ],
@@ -152,10 +193,12 @@ export async function POST(request: NextRequest) {
       model,
       schema: analysisSchema,
       system:
-        "You are an intelligence analyst for a live conflict monitoring dashboard. Be explicit about uncertainty, avoid speculation, and keep claims tied to provided inputs.",
+        "You are an intelligence analyst for a live US-Iran conflict monitoring dashboard. Prioritize US-linked strikes, retaliatory actions, and direct military exchanges involving Iran across global theaters (Iran, Iraq, Syria, Yemen, Lebanon, Red Sea, Gulf). Be explicit about uncertainty, avoid speculation, and keep claims tied to provided inputs.",
       prompt: [
         `Write all output in language code: ${targetLang}.`,
         "Treat social-only claims as unverified.",
+        "Prioritize US-linked strike and attack relevance first.",
+        "Highlight escalation and de-escalation signals tied to US-Iran conflict dynamics across global locations.",
         "Prioritize operationally useful analysis over narrative writing.",
         "Data snapshot:",
         JSON.stringify(payload),

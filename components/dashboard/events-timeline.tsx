@@ -78,7 +78,10 @@ export function EventsTimeline({
               <div className="flex items-start justify-between gap-2">
                 <div>
                   <h3 className="text-sm font-semibold text-slate-900">{translateText(event.title)}</h3>
-                  <p className="mt-1 text-xs text-slate-500">{translateText(event.placeName)}</p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {translateText(event.placeName)}
+                    {event.country ? `, ${translateText(event.country)}` : ""}
+                  </p>
                 </div>
                 <div className="text-right text-[11px] text-slate-500">
                   <p>{formatAgo(event.eventTs)}</p>

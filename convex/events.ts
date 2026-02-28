@@ -12,6 +12,10 @@ import {
   sourceTypeValidator,
 } from "./types";
 
+function isGeoPrecisePlace(placeName: string): boolean {
+  return !placeName.toLowerCase().includes("unspecified");
+}
+
 async function recomputeEvent(ctx: any, eventId: any) {
   const event = await ctx.db.get(eventId);
   if (!event) {
@@ -34,7 +38,7 @@ async function recomputeEvent(ctx: any, eventId: any) {
       sourceName: source.sourceName,
     })),
     hasSignals: sourceTypes.includes("signals"),
-    isGeoPrecise: event.placeName !== "Iran (unspecified)",
+    isGeoPrecise: isGeoPrecisePlace(event.placeName),
     hasConflict: Boolean(event.hasConflict),
     eventTs: event.eventTs,
   });
@@ -80,7 +84,7 @@ export const upsertEvent = mutation({
         lat: args.lat,
         lon: args.lon,
         placeName: args.placeName,
-        country: args.country ?? "Iran",
+        country: args.country ?? "Unknown",
         sourceTypes: mergeSourceTypes(existing.sourceTypes, args.sourceType),
         whatWeKnow: args.whatWeKnow,
         whatWeDontKnow: args.whatWeDontKnow,
@@ -101,7 +105,7 @@ export const upsertEvent = mutation({
       lat: args.lat,
       lon: args.lon,
       placeName: args.placeName,
-      country: args.country ?? "Iran",
+      country: args.country ?? "Unknown",
       sourceTypes: [args.sourceType],
       clusterId: resolvedClusterId,
       whatWeKnow: args.whatWeKnow,

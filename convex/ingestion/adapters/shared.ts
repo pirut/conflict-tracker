@@ -3,7 +3,9 @@ import {
   CONFLICT_RELEVANCE_TERMS,
   IRAN_RELEVANCE_TERMS,
   NOISE_TERMS,
+  STRIKE_FOCUS_TERMS,
   TRUSTED_NEWS_DOMAINS,
+  US_RELEVANCE_TERMS,
 } from "../../constants";
 import { resolvePlaceFromText } from "../../lib/geo";
 
@@ -81,6 +83,7 @@ export function derivePlace(text: string): {
   placeName: string;
   lat: number;
   lon: number;
+  country: string;
   isGeoPrecise: boolean;
 } {
   return resolvePlaceFromText(text);
@@ -135,12 +138,45 @@ export function computeNewsRelevanceScore(text: string): number {
   return Math.max(0, Math.min(100, score));
 }
 
+export function computeUSIranWarScore(text: string): number {
+  const normalized = normalizeText(text).toLowerCase();
+  const usMatches = countMatches(normalized, US_RELEVANCE_TERMS);
+  const iranMatches = countMatches(normalized, IRAN_RELEVANCE_TERMS);
+  const strikeMatches = countMatches(normalized, STRIKE_FOCUS_TERMS);
+
+  let score = 0;
+  score += usMatches.length * 22;
+  score += iranMatches.length * 18;
+  score += strikeMatches.length * 16;
+
+  if (usMatches.length > 0 && iranMatches.length > 0) {
+    score += 14;
+  }
+  if (usMatches.length > 0 && strikeMatches.length > 0) {
+    score += 10;
+  }
+  if (strikeMatches.length >= 2) {
+    score += 8;
+  }
+
+  if (usMatches.length === 0) {
+    score -= 22;
+  }
+  if (strikeMatches.length === 0) {
+    score -= 14;
+  }
+
+  return Math.max(0, Math.min(100, score));
+}
+
 export function isRelevantIranConflictNews(
   title: string,
   summary?: string,
 ): boolean {
-  const score = computeNewsRelevanceScore(`${title} ${summary ?? ""}`);
-  return score >= 38;
+  const merged = `${title} ${summary ?? ""}`;
+  const score = computeNewsRelevanceScore(merged);
+  const usIranWarScore = computeUSIranWarScore(merged);
+  return score >= 42 && usIranWarScore >= 34;
 }
 
 function extractActors(text: string): string[] {
@@ -148,7 +184,10 @@ function extractActors(text: string): string[] {
     "iran",
     "israel",
     "united states",
-    "us",
+    "u.s.",
+    "american",
+    "pentagon",
+    "centcom",
     "irgc",
     "iaea",
     "idf",
@@ -190,21 +229,32 @@ export function buildNewsIntelligence(input: {
   baseConfidenceHint?: string;
 }): {
   relevanceScore: number;
+  usIranWarScore: number;
+  isUSLinked: boolean;
   whatWeKnow: string[];
   whatWeDontKnow: string[];
 } {
   const merged = normalizeText(`${input.title} ${input.summary}`);
   const relevanceScore = computeNewsRelevanceScore(merged);
+  const usIranWarScore = computeUSIranWarScore(merged);
+  const usTerms = countMatches(merged.toLowerCase(), US_RELEVANCE_TERMS);
+  const isUSLinked = usTerms.length > 0;
   const actors = extractActors(merged);
   const impacts = extractImpacts(merged);
 
   const whatWeKnow = [
     `${input.sourceName} reported this incident.`,
     input.baseConfidenceHint ?? "This report passed conflict relevance filtering.",
-    relevanceScore >= 65
-      ? "Content strongly matches Iran conflict indicators."
-      : "Content has partial conflict relevance indicators.",
+    usIranWarScore >= 55
+      ? "Report strongly matches US-Iran strike escalation indicators."
+      : relevanceScore >= 65
+        ? "Content strongly matches Iran conflict indicators."
+        : "Content has partial conflict relevance indicators.",
   ];
+
+  if (isUSLinked) {
+    whatWeKnow.push("US-linked actor terms are explicitly present in this report.");
+  }
 
   if (actors.length > 0) {
     whatWeKnow.push(`Actors mentioned: ${actors.join(", ")}.`);
@@ -229,6 +279,8 @@ export function buildNewsIntelligence(input: {
 
   return {
     relevanceScore,
+    usIranWarScore,
+    isUSLinked,
     whatWeKnow: whatWeKnow.slice(0, 5),
     whatWeDontKnow: whatWeDontKnow.slice(0, 4),
   };

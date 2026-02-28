@@ -1,6 +1,6 @@
-# Iran Live Situation Dashboard
+# US-Iran Global Conflict Monitor
 
-Production-grade realtime dashboard built with Next.js App Router + Convex.
+Production-grade realtime dashboard built with Next.js App Router + Convex, focused on US-vs-Iran conflict activity across global theaters.
 
 ## Stack
 - Frontend: Next.js 16 (App Router), TypeScript, TailwindCSS, React Leaflet, Recharts
@@ -128,6 +128,7 @@ Optional:
 - `THENEWSAPI_KEY`
 - `PREFERRED_NEWS_LANGUAGE`
 - `INCLUDE_NON_ENGLISH_NEWS`
+- `FOCUS_US_IRAN`
 - `FIRMS_API_KEY`
 - `FIRMS_SATELLITE`
 - `OPENSKY_USERNAME`
@@ -185,3 +186,4 @@ npx vercel --prod
 
 ## Notes
 - `convex/_generated/api.ts` and `convex/_generated/server.ts` in this repo are temporary compile stubs for one-shot buildability; `npx convex dev` overwrites them with real generated bindings.
+- Focus mode prioritizes US-linked Iran conflict reporting (`FOCUS_US_IRAN=true`), including events in Iran, Iraq, Syria, Yemen, Lebanon, Red Sea, Gulf corridors, and related theaters.

@@ -115,6 +115,61 @@ export const CONFLICT_RELEVANCE_TERMS = [
   "raid",
 ] as const;
 
+export const US_RELEVANCE_TERMS = [
+  "united states",
+  "us ",
+  "us-",
+  "us-led",
+  "u.s.",
+  "u.s",
+  "u.s.-",
+  "u.s.-led",
+  "american",
+  "pentagon",
+  "centcom",
+  "white house",
+  "us military",
+  "us forces",
+  "u.s. forces",
+  "air force",
+] as const;
+
+export const STRIKE_FOCUS_TERMS = [
+  "airstrike",
+  "strike",
+  "attack",
+  "bombardment",
+  "missile",
+  "drone strike",
+  "retaliatory",
+  "intercepted",
+  "salvo",
+] as const;
+
+export const GLOBAL_US_IRAN_LOCATION_TERMS = [
+  "Iran",
+  "Tehran",
+  "Isfahan",
+  "Natanz",
+  "Qom",
+  "Tabriz",
+  "Iraq",
+  "Baghdad",
+  "Erbil",
+  "Syria",
+  "Damascus",
+  "Deir ez-Zor",
+  "Yemen",
+  "Sanaa",
+  "Red Sea",
+  "Lebanon",
+  "Beirut",
+  "Israel",
+  "Gaza",
+  "Hormuz",
+  "Persian Gulf",
+] as const;
+
 export const NOISE_TERMS = [
   "football",
   "soccer",

@@ -28,10 +28,10 @@ export function MapCanvas({ events, onSelect, selectedEventId, translateText }: 
 
   return (
     <MapContainer
-      center={[32.4279, 53.688]}
-      zoom={5}
-      minZoom={4}
-      maxZoom={10}
+      center={[26.0, 36.0]}
+      zoom={3}
+      minZoom={2}
+      maxZoom={9}
       style={{ height: "100%", width: "100%" }}
       scrollWheelZoom
     >
@@ -67,7 +67,10 @@ export function MapCanvas({ events, onSelect, selectedEventId, translateText }: 
                 <p className="font-semibold">
                   {cluster.count} {translateText(cluster.count > 1 ? "events" : "event")}
                 </p>
-                <p>{translateText(event.placeName)}</p>
+                <p>
+                  {translateText(event.placeName)}
+                  {event.country ? `, ${translateText(event.country)}` : ""}
+                </p>
                 <p>
                   {translateText("Max confidence")}: {cluster.maxConfidence.toFixed(0)}
                 </p>

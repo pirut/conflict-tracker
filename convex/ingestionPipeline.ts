@@ -26,6 +26,10 @@ const STRIKE_CATEGORIES = new Set([
   "military_base",
 ]);
 
+function isGeoPrecisePlace(placeName: string): boolean {
+  return !placeName.toLowerCase().includes("unspecified");
+}
+
 async function recomputeEventConfidence(ctx: any, eventId: any) {
   const event = await ctx.db.get(eventId);
   if (!event) {
@@ -48,7 +52,7 @@ async function recomputeEventConfidence(ctx: any, eventId: any) {
       sourceName: source.sourceName,
     })),
     hasSignals: sourceTypes.includes("signals"),
-    isGeoPrecise: event.placeName !== "Iran (unspecified)",
+    isGeoPrecise: isGeoPrecisePlace(event.placeName),
     hasConflict: Boolean(event.hasConflict),
     eventTs: event.eventTs,
   });
@@ -306,10 +310,10 @@ async function processSingleItem(ctx: any, item: any) {
             ? workingItem.summary
             : existing.summary,
         category: existing.category === "other" ? workingItem.category : existing.category,
-        lat: existing.placeName === "Iran (unspecified)" ? workingItem.lat : existing.lat,
-        lon: existing.placeName === "Iran (unspecified)" ? workingItem.lon : existing.lon,
+        lat: !isGeoPrecisePlace(existing.placeName) ? workingItem.lat : existing.lat,
+        lon: !isGeoPrecisePlace(existing.placeName) ? workingItem.lon : existing.lon,
         placeName:
-          existing.placeName === "Iran (unspecified)" ? workingItem.placeName : existing.placeName,
+          !isGeoPrecisePlace(existing.placeName) ? workingItem.placeName : existing.placeName,
         sourceTypes: mergeSourceTypes(existing.sourceTypes, workingItem.sourceType),
         hasConflict: Boolean(existing.hasConflict || cluster?.hasConflict || workingItem.isConflicting),
         whatWeKnow: mergeInsights(existing.whatWeKnow, workingItem.whatWeKnow),
@@ -330,7 +334,7 @@ async function processSingleItem(ctx: any, item: any) {
       lat: workingItem.lat,
       lon: workingItem.lon,
       placeName: workingItem.placeName,
-      country: workingItem.country || "Iran",
+      country: workingItem.country || "Unknown",
       sourceTypes: [workingItem.sourceType],
       clusterId: buildClusterId(workingItem.lat, workingItem.lon, eventTs),
       hasConflict: Boolean(workingItem.isConflicting),

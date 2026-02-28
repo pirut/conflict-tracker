@@ -58,7 +58,10 @@ export function EventDrawer({ event, onClose, translateText, labels }: EventDraw
         </div>
         <div className="rounded-md border border-slate-200 bg-slate-50 p-2">
           <p className="text-[10px] uppercase tracking-wide text-slate-500">{translateText("Location")}</p>
-          <p className="mt-1 text-sm font-semibold text-slate-900">{translateText(event.placeName)}</p>
+          <p className="mt-1 text-sm font-semibold text-slate-900">
+            {translateText(event.placeName)}
+            {event.country ? `, ${translateText(event.country)}` : ""}
+          </p>
         </div>
       </div>
 

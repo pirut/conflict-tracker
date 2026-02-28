@@ -89,8 +89,8 @@ type XUser = {
 };
 
 const REDDIT_QUERIES = [
-  "iran tehran isfahan natanz qom tabriz strike explosion missile drone air defense",
-  "iran connectivity outage internet shutdown flights disruption",
+  "iran iraq syria yemen lebanon red sea hormuz united states us u.s. pentagon centcom strike explosion missile drone air defense",
+  "tehran baghdad damascus sanaa beirut us attack airstrike retaliation bombardment missile drone military base",
 ];
 
 function resolveXQuery(): string {
@@ -99,8 +99,11 @@ function resolveXQuery(): string {
     return fromEnv;
   }
 
-  const base =
-    '(iran OR tehran OR isfahan OR natanz OR qom OR tabriz) (strike OR explosion OR missile OR drone OR "air defense" OR refinery OR nuclear OR "military base" OR connectivity OR outage)';
+  const base = [
+    "(iran OR tehran OR isfahan OR natanz OR qom OR tabriz OR iraq OR baghdad OR erbil OR syria OR damascus OR yemen OR sanaa OR lebanon OR beirut OR red sea OR hormuz OR persian gulf)",
+    '("united states" OR "u.s." OR us OR pentagon OR centcom OR "us military" OR american)',
+    '(strike OR airstrike OR explosion OR attack OR missile OR drone OR retaliation OR bombardment OR "air defense" OR "military base")',
+  ].join(" ");
   const includeReplies = (process.env.X_API_INCLUDE_REPLIES ?? "false") === "true";
   const lang = process.env.X_API_LANG?.trim().toLowerCase();
 
@@ -202,7 +205,7 @@ async function fetchXItems(now: number): Promise<{
         lat: place.lat,
         lon: place.lon,
         placeName: place.placeName,
-        country: "Iran",
+        country: place.country,
         keywords: extractKeywords(text),
         credibilityWeight,
         rawJson: {
@@ -287,7 +290,7 @@ function buildMockSocialItems(now: number): NormalizedIngestItem[] {
       lat: place.lat,
       lon: place.lon,
       placeName: place.placeName,
-      country: "Iran",
+      country: place.country,
       keywords: extractKeywords(post.text),
       credibilityWeight: 0.2,
       rawJson: post as unknown as Record<string, unknown>,
@@ -361,7 +364,7 @@ async function fetchRedditItems(now: number): Promise<{
         lat: place.lat,
         lon: place.lon,
         placeName: place.placeName,
-        country: "Iran",
+        country: place.country,
         keywords: extractKeywords(summaryRaw),
         credibilityWeight: 0.24,
         rawJson: {
@@ -429,7 +432,7 @@ async function fetchEndpointItems(endpoint: string, now: number): Promise<Normal
         lat: place.lat,
         lon: place.lon,
         placeName: place.placeName,
-        country: "Iran",
+        country: place.country,
         keywords: extractKeywords(text),
         credibilityWeight: 0.28,
         rawJson: post as unknown as Record<string, unknown>,

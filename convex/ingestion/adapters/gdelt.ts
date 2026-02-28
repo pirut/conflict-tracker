@@ -2,6 +2,7 @@
 
 import {
   CONFLICT_RELEVANCE_TERMS,
+  GLOBAL_US_IRAN_LOCATION_TERMS,
   IRAN_RELEVANCE_TERMS,
   NEWS_QUERY_KEYWORDS,
 } from "../../constants";
@@ -131,6 +132,7 @@ type NewsCandidate = {
 
 const PREFERRED_NEWS_LANGUAGE = process.env.PREFERRED_NEWS_LANGUAGE ?? "en";
 const INCLUDE_NON_ENGLISH = (process.env.INCLUDE_NON_ENGLISH_NEWS ?? "false") === "true";
+const FOCUS_US_IRAN = (process.env.FOCUS_US_IRAN ?? "true") === "true";
 
 const RSS_FEEDS: Array<{
   sourceName: string;
@@ -160,6 +162,18 @@ const RSS_FEEDS: Array<{
 ];
 
 function buildNewsQuery(): string {
+  if (FOCUS_US_IRAN) {
+    const locationClause = GLOBAL_US_IRAN_LOCATION_TERMS.map((term) =>
+      term.includes(" ") ? `"${term}"` : term,
+    ).join(" OR ");
+
+    return [
+      `(${locationClause})`,
+      '("united states" OR "u.s." OR us OR american OR pentagon OR centcom OR "us military")',
+      '(strike OR airstrike OR explosion OR attack OR missile OR drone OR "air defense" OR bombardment OR retaliatory)',
+    ].join(" AND ");
+  }
+
   const geoTerms = NEWS_QUERY_KEYWORDS.filter((keyword) =>
     IRAN_RELEVANCE_TERMS.some((term) => keyword.toLowerCase().includes(term)),
   );
@@ -317,12 +331,14 @@ function normalizeNewsCandidate(candidate: NewsCandidate, now: number): Normaliz
     lat: place.lat,
     lon: place.lon,
     placeName: place.placeName,
-    country: "Iran",
+    country: place.country,
     keywords: extractKeywords(`${title} ${summary}`),
     credibilityWeight: extractCredibilityWeight(candidate.url),
     rawJson: {
       ...candidate.raw,
       relevanceScore: intel.relevanceScore,
+      usIranWarScore: intel.usIranWarScore,
+      isUSLinked: intel.isUSLinked,
       originalLanguage: candidate.language,
       normalizedLanguage,
     },
