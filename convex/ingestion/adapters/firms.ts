@@ -104,7 +104,9 @@ export async function fetchFirmsHotspots(
   }
 
   const satellite = process.env.FIRMS_SATELLITE ?? "VIIRS_SNPP_NRT";
-  const url = `https://firms.modaps.eosdis.nasa.gov/api/country/csv/${apiKey}/${satellite}/IRN/1`;
+  // Area API: west,south,east,north (Iran bbox). Override with FIRMS_AREA_BBOX env if needed.
+  const areaBbox = process.env.FIRMS_AREA_BBOX ?? "44,25,63.5,39.8";
+  const url = `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${apiKey}/${satellite}/${areaBbox}/1`;
 
   try {
     const csv = await fetchText(url);
