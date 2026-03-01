@@ -31,6 +31,10 @@ Free/no-signup sources are prioritized by default.
   - NASA EONET satellite events
   - USGS seismic events
   - OpenSky (with ADSB.lol fallback) flight observations
+  - AviationWeather METAR anomaly signals
+  - Open-Meteo weather/air/flood anomaly signals
+  - openSenseMap crowd sensor anomaly signals
+  - Public orbital TLE context signals
   - Inferred power-stress signal from free telemetry when no direct outage feed is configured
 - Signals (optional extras):
   - NASA FIRMS thermal hotspots (if `FIRMS_API_KEY` is set)
@@ -89,11 +93,15 @@ Defined in [`convex/crons.ts`](./convex/crons.ts):
 
 - News every 2 minutes
 - FIRMS every 5 minutes
+- Open-Meteo every 12 minutes
 - Satellite (EONET) every 10 minutes
 - Seismic (USGS) every 10 minutes
 - Flights every 5 minutes
+- AviationWeather every 10 minutes
 - Connectivity every 5 minutes
 - Power every 10 minutes
+- openSenseMap every 15 minutes
+- Orbital every 60 minutes
 - Social every 5 minutes (only when `ENABLE_SOCIAL_INGESTION=true`)
 
 ## Quality Controls

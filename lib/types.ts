@@ -36,7 +36,19 @@ export type DashboardEvent = {
 
 export type SignalRecord = {
   _id: string;
-  type: "connectivity" | "flight" | "firms" | "satellite" | "power" | "seismic";
+  type:
+    | "connectivity"
+    | "flight"
+    | "firms"
+    | "satellite"
+    | "power"
+    | "seismic"
+    | "weather"
+    | "air_quality"
+    | "flood"
+    | "aviation_weather"
+    | "environmental_crowd"
+    | "orbital";
   payload: Record<string, unknown>;
   createdAt: number;
 };

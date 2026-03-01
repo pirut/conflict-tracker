@@ -29,6 +29,12 @@ export const SIGNAL_TYPES = [
   "satellite",
   "power",
   "seismic",
+  "weather",
+  "air_quality",
+  "flood",
+  "aviation_weather",
+  "environmental_crowd",
+  "orbital",
 ] as const;
 
 export const INGEST_STATUS = ["running", "success", "failed"] as const;

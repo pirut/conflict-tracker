@@ -90,6 +90,7 @@ function signalKindFromSource(source: EventSource, fallbackCategory: string): Ev
   if (explicitType === "satellite") return "satellite";
   if (explicitType === "power") return "power";
   if (explicitType === "seismic") return "seismic";
+  if (explicitType === "aviation_weather") return "flight";
 
   const sourceName = source.sourceName.toLowerCase();
   if (sourceName.includes("ooni") || sourceName.includes("connectivity")) return "connectivity";
@@ -221,6 +222,7 @@ function signalKindFromRecord(signal: SignalRecord): EvidenceKind {
   if (signal.type === "satellite") return "satellite";
   if (signal.type === "power") return "power";
   if (signal.type === "seismic") return "seismic";
+  if (signal.type === "aviation_weather") return "flight";
   return "other_signal";
 }
 
@@ -259,6 +261,12 @@ function signalBaseScore(kind: EvidenceKind, payload: Record<string, unknown>): 
 
   if (kind === "satellite") return 68;
   if (kind === "flight") return 57;
+  if (kind === "other_signal") {
+    const severity = Number(payload.severity ?? payload.anomalyScore ?? NaN);
+    if (Number.isFinite(severity)) {
+      return clamp(30 + severity * 0.7);
+    }
+  }
   return 54;
 }
 

@@ -54,6 +54,12 @@ export const signalTypeValidator = v.union(
   v.literal("satellite"),
   v.literal("power"),
   v.literal("seismic"),
+  v.literal("weather"),
+  v.literal("air_quality"),
+  v.literal("flood"),
+  v.literal("aviation_weather"),
+  v.literal("environmental_crowd"),
+  v.literal("orbital"),
 );
 
 export const ingestStatusValidator = v.union(

@@ -52,6 +52,64 @@ export async function fetchText(
   }
 }
 
+type NominatimReverseResponse = {
+  display_name?: string;
+  address?: {
+    city?: string;
+    town?: string;
+    village?: string;
+    county?: string;
+    state?: string;
+    country?: string;
+  };
+};
+
+const reverseNominatimCache = new Map<string, { placeName: string; country: string }>();
+
+export async function reverseGeocodeNominatim(
+  lat: number,
+  lon: number,
+): Promise<{ placeName: string; country: string } | null> {
+  if ((process.env.NOMINATIM_REVERSE_ENABLED ?? "true") !== "true") {
+    return null;
+  }
+
+  const key = `${lat.toFixed(3)},${lon.toFixed(3)}`;
+  const cached = reverseNominatimCache.get(key);
+  if (cached) {
+    return cached;
+  }
+
+  const url = new URL("https://nominatim.openstreetmap.org/reverse");
+  url.searchParams.set("format", "jsonv2");
+  url.searchParams.set("lat", String(lat));
+  url.searchParams.set("lon", String(lon));
+  url.searchParams.set("zoom", "10");
+  url.searchParams.set("accept-language", "en");
+
+  try {
+    const payload = await fetchJson<NominatimReverseResponse>(url.toString(), {
+      headers: {
+        "User-Agent": "conflict-tracker/3.0 (+https://localhost)",
+      },
+    });
+    const placeName =
+      payload.address?.city ??
+      payload.address?.town ??
+      payload.address?.village ??
+      payload.address?.county ??
+      payload.address?.state ??
+      payload.display_name?.split(",")[0]?.trim() ??
+      "Unknown area";
+    const country = payload.address?.country ?? "Unknown";
+    const normalized = { placeName, country };
+    reverseNominatimCache.set(key, normalized);
+    return normalized;
+  } catch {
+    return null;
+  }
+}
+
 export function parseTimestamp(input: string | number | undefined, fallback: number): number {
   if (typeof input === "number") {
     return Number.isFinite(input) ? input : fallback;

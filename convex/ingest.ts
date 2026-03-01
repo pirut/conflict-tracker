@@ -6,10 +6,14 @@ import { v } from "convex/values";
 import { internalAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import {
+  fetchAviationWeatherSignals,
   fetchConnectivitySignals,
   fetchFirmsHotspots,
   fetchFlightSignals,
   fetchGdeltNews,
+  fetchOpenMeteoSignals,
+  fetchOpenSenseMapSignals,
+  fetchOrbitalSignals,
   fetchPowerSignals,
   fetchSatelliteSignals,
   fetchSeismicSignals,
@@ -182,6 +186,58 @@ export const ingestPower = internalAction({
   },
 });
 
+export const ingestOpenMeteo = internalAction({
+  args: {},
+  returns: v.object({
+    sourceName: v.string(),
+    itemsIn: v.number(),
+    itemsOut: v.number(),
+    warnings: v.array(v.string()),
+  }),
+  handler: async (ctx): Promise<AdapterRunSummary> => {
+    return await runAdapter(ctx, "Open-Meteo", fetchOpenMeteoSignals);
+  },
+});
+
+export const ingestAviationWeather = internalAction({
+  args: {},
+  returns: v.object({
+    sourceName: v.string(),
+    itemsIn: v.number(),
+    itemsOut: v.number(),
+    warnings: v.array(v.string()),
+  }),
+  handler: async (ctx): Promise<AdapterRunSummary> => {
+    return await runAdapter(ctx, "AviationWeather", fetchAviationWeatherSignals);
+  },
+});
+
+export const ingestOpenSenseMap = internalAction({
+  args: {},
+  returns: v.object({
+    sourceName: v.string(),
+    itemsIn: v.number(),
+    itemsOut: v.number(),
+    warnings: v.array(v.string()),
+  }),
+  handler: async (ctx): Promise<AdapterRunSummary> => {
+    return await runAdapter(ctx, "openSenseMap", fetchOpenSenseMapSignals);
+  },
+});
+
+export const ingestOrbital = internalAction({
+  args: {},
+  returns: v.object({
+    sourceName: v.string(),
+    itemsIn: v.number(),
+    itemsOut: v.number(),
+    warnings: v.array(v.string()),
+  }),
+  handler: async (ctx): Promise<AdapterRunSummary> => {
+    return await runAdapter(ctx, "Orbital", fetchOrbitalSignals);
+  },
+});
+
 export const runAllIngestion = internalAction({
   args: {},
   returns: v.object({
@@ -201,7 +257,11 @@ export const runAllIngestion = internalAction({
       runAdapter(ctx, "NASA EONET", fetchSatelliteSignals),
       runAdapter(ctx, "USGS Seismic", fetchSeismicSignals),
       runAdapter(ctx, "OpenSky", fetchFlightSignals),
+      runAdapter(ctx, "AviationWeather", fetchAviationWeatherSignals),
       runAdapter(ctx, "Connectivity", fetchConnectivitySignals),
+      runAdapter(ctx, "Open-Meteo", fetchOpenMeteoSignals),
+      runAdapter(ctx, "openSenseMap", fetchOpenSenseMapSignals),
+      runAdapter(ctx, "Orbital", fetchOrbitalSignals),
       runAdapter(ctx, "Power Signals", fetchPowerSignals),
     ]);
 

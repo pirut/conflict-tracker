@@ -1,7 +1,11 @@
+export { fetchAviationWeatherSignals } from "./aviationWeather";
 export { fetchConnectivitySignals } from "./connectivity";
 export { fetchFirmsHotspots } from "./firms";
 export { fetchFlightSignals } from "./flights";
 export { fetchGdeltNews } from "./gdelt";
+export { fetchOpenMeteoSignals } from "./openMeteo";
+export { fetchOpenSenseMapSignals } from "./openSenseMap";
+export { fetchOrbitalSignals } from "./orbital";
 export { fetchPowerSignals } from "./power";
 export { fetchSatelliteSignals } from "./satellite";
 export { fetchSeismicSignals } from "./seismic";
