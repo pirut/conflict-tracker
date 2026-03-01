@@ -10,6 +10,9 @@ import {
   fetchFirmsHotspots,
   fetchFlightSignals,
   fetchGdeltNews,
+  fetchPowerSignals,
+  fetchSatelliteSignals,
+  fetchSeismicSignals,
   fetchSocialReports,
 } from "./ingestion/adapters";
 import { AdapterContext, IngestionAdapterResult } from "./ingestion/types";
@@ -140,6 +143,45 @@ export const ingestSocial = internalAction({
   },
 });
 
+export const ingestSatellite = internalAction({
+  args: {},
+  returns: v.object({
+    sourceName: v.string(),
+    itemsIn: v.number(),
+    itemsOut: v.number(),
+    warnings: v.array(v.string()),
+  }),
+  handler: async (ctx): Promise<AdapterRunSummary> => {
+    return await runAdapter(ctx, "NASA EONET", fetchSatelliteSignals);
+  },
+});
+
+export const ingestSeismic = internalAction({
+  args: {},
+  returns: v.object({
+    sourceName: v.string(),
+    itemsIn: v.number(),
+    itemsOut: v.number(),
+    warnings: v.array(v.string()),
+  }),
+  handler: async (ctx): Promise<AdapterRunSummary> => {
+    return await runAdapter(ctx, "USGS Seismic", fetchSeismicSignals);
+  },
+});
+
+export const ingestPower = internalAction({
+  args: {},
+  returns: v.object({
+    sourceName: v.string(),
+    itemsIn: v.number(),
+    itemsOut: v.number(),
+    warnings: v.array(v.string()),
+  }),
+  handler: async (ctx): Promise<AdapterRunSummary> => {
+    return await runAdapter(ctx, "Power Signals", fetchPowerSignals);
+  },
+});
+
 export const runAllIngestion = internalAction({
   args: {},
   returns: v.object({
@@ -156,8 +198,11 @@ export const runAllIngestion = internalAction({
     const runs = await Promise.all([
       runAdapter(ctx, "GDELT", fetchGdeltNews),
       runAdapter(ctx, "NASA FIRMS", fetchFirmsHotspots),
+      runAdapter(ctx, "NASA EONET", fetchSatelliteSignals),
+      runAdapter(ctx, "USGS Seismic", fetchSeismicSignals),
       runAdapter(ctx, "OpenSky", fetchFlightSignals),
       runAdapter(ctx, "Connectivity", fetchConnectivitySignals),
+      runAdapter(ctx, "Power Signals", fetchPowerSignals),
     ]);
 
     if ((process.env.ENABLE_SOCIAL_INGESTION ?? "false") === "true") {

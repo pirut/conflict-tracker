@@ -283,7 +283,10 @@ async function processSingleItem(ctx: any, item: any) {
       type: workingItem.signalType,
       payload: {
         ...workingItem.rawJson,
+        signalType: workingItem.signalType,
         region: workingItem.placeName,
+        lat: workingItem.lat,
+        lon: workingItem.lon,
         sourceName: workingItem.sourceName,
         title: workingItem.title,
         summary: workingItem.summary,

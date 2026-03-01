@@ -29,6 +29,9 @@ export const eventCategoryValidator = v.union(
   v.literal("connectivity"),
   v.literal("flight"),
   v.literal("fire"),
+  v.literal("power"),
+  v.literal("seismic"),
+  v.literal("satellite"),
   v.literal("other"),
 );
 
@@ -48,6 +51,9 @@ export const signalTypeValidator = v.union(
   v.literal("connectivity"),
   v.literal("flight"),
   v.literal("firms"),
+  v.literal("satellite"),
+  v.literal("power"),
+  v.literal("seismic"),
 );
 
 export const ingestStatusValidator = v.union(

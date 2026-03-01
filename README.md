@@ -1,6 +1,6 @@
 # US-Iran Conflict Intelligence Desk
 
-A rebuilt Next.js + Convex monitoring app focused on one job: high-signal aggregation and AI summarization of the active US-Iran conflict cycle.
+A Next.js + Convex monitoring app focused on one job: fusing multi-source conflict telemetry into a map that separates **likely activity** from **confirmed activity (100% threshold)**.
 
 ## What Changed
 
@@ -20,14 +20,21 @@ This version was reset around data quality:
 
 ## Core Data Sources
 
+Free/no-signup sources are prioritized by default.
+
 - News (primary):
   - GDELT (strict filtering on accepted rows)
   - Guardian API
   - Curated RSS (BBC, Al Jazeera, NYTimes, Guardian, Reuters)
-- Signals:
+- Signals (free by default):
   - OONI connectivity anomalies
+  - NASA EONET satellite events
+  - USGS seismic events
   - OpenSky (with ADSB.lol fallback) flight observations
-  - NASA FIRMS hotspots (if `FIRMS_API_KEY` is set)
+  - Inferred power-stress signal from free telemetry when no direct outage feed is configured
+- Signals (optional extras):
+  - NASA FIRMS thermal hotspots (if `FIRMS_API_KEY` is set)
+  - Custom power outage endpoint (`POWER_OUTAGE_FEED_ENDPOINT`)
 - Social (optional, unverified):
   - Reddit (quality-gated)
     - If Reddit API returns 403/429, app falls back to PullPush mirror and still applies quality gates
@@ -82,8 +89,11 @@ Defined in [`convex/crons.ts`](./convex/crons.ts):
 
 - News every 2 minutes
 - FIRMS every 5 minutes
+- Satellite (EONET) every 10 minutes
+- Seismic (USGS) every 10 minutes
 - Flights every 5 minutes
 - Connectivity every 5 minutes
+- Power every 10 minutes
 - Social every 5 minutes (only when `ENABLE_SOCIAL_INGESTION=true`)
 
 ## Quality Controls

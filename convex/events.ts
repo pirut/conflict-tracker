@@ -356,10 +356,15 @@ export const getEventById = query({
 export const getSignals = query({
   args: {
     type: v.optional(signalTypeValidator),
+    timeRangeHours: v.optional(v.number()),
   },
   returns: v.array(v.any()),
   handler: async (ctx, args) => {
-    const since = Date.now() - 24 * 60 * 60 * 1000;
+    const timeRangeHoursRaw = Number(args.timeRangeHours ?? 24);
+    const timeRangeHours = Number.isFinite(timeRangeHoursRaw)
+      ? Math.max(1, Math.min(24 * 14, Math.round(timeRangeHoursRaw)))
+      : 24;
+    const since = Date.now() - timeRangeHours * 60 * 60 * 1000;
 
     if (args.type) {
       return await ctx.db

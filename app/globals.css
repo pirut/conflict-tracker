@@ -28,9 +28,9 @@ body {
 body {
   color: var(--text);
   background:
-    radial-gradient(circle at 10% 8%, #f7f2e5 0%, #f7f2e5 20%, transparent 45%),
-    radial-gradient(circle at 88% 14%, #d9d4c9 0%, #d9d4c9 18%, transparent 45%),
-    linear-gradient(175deg, #f0e9d8 0%, #ece4d1 50%, #e6ddca 100%);
+    radial-gradient(circle at 14% 9%, #fdf6e4 0%, #f7f2e7 23%, transparent 54%),
+    radial-gradient(circle at 88% 11%, #d6dfeb 0%, #dde3ea 20%, transparent 51%),
+    linear-gradient(172deg, #f1ead8 0%, #ebe2ce 46%, #e5dbc8 100%);
   font-family: var(--font-body), serif;
 }
 
@@ -40,7 +40,7 @@ body {
 
 .monitor-card {
   border: 1px solid var(--line);
-  border-radius: 16px;
+  border-radius: 18px;
   background: var(--panel);
   box-shadow:
     0 1px 0 rgba(66, 55, 28, 0.18),
@@ -87,6 +87,25 @@ body {
   font-size: 20px;
   color: #1d1e2c;
   line-height: 1.1;
+}
+
+.layer-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border: 1px solid #d7d0bf;
+  border-radius: 999px;
+  background: #fbf7ef;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #55492f;
+}
+
+.layer-toggle input {
+  accent-color: #846938;
 }
 
 a {

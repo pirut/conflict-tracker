@@ -12,6 +12,9 @@ export const EVENT_CATEGORIES = [
   "connectivity",
   "flight",
   "fire",
+  "power",
+  "seismic",
+  "satellite",
   "other",
 ] as const;
 
@@ -19,7 +22,14 @@ export const SOURCE_TYPES = ["news", "signals", "social"] as const;
 
 export const CONFIDENCE_LABELS = ["High", "Medium", "Low"] as const;
 
-export const SIGNAL_TYPES = ["connectivity", "flight", "firms"] as const;
+export const SIGNAL_TYPES = [
+  "connectivity",
+  "flight",
+  "firms",
+  "satellite",
+  "power",
+  "seismic",
+] as const;
 
 export const INGEST_STATUS = ["running", "success", "failed"] as const;
 
@@ -68,6 +78,9 @@ export const CATEGORY_KEYWORDS: Record<string, string[]> = {
   connectivity: ["internet", "connectivity", "shutdown", "outage"],
   flight: ["flight", "air traffic", "aviation", "airspace"],
   fire: ["wildfire", "hotspot", "thermal anomaly", "fire"],
+  power: ["power outage", "blackout", "grid", "electricity", "substation"],
+  seismic: ["earthquake", "seismic", "tremor", "magnitude"],
+  satellite: ["satellite", "remote sensing", "orbital", "eonet"],
 };
 
 export const TRUSTED_NEWS_DOMAINS = [

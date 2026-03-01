@@ -5,6 +5,18 @@ const crons = cronJobs();
 
 crons.interval("ingest gdelt every 2 minutes", { minutes: 2 }, internal.ingest.ingestGdelt, {});
 crons.interval("ingest firms every 5 minutes", { minutes: 5 }, internal.ingest.ingestFirms, {});
+crons.interval(
+  "ingest satellite every 10 minutes",
+  { minutes: 10 },
+  internal.ingest.ingestSatellite,
+  {},
+);
+crons.interval(
+  "ingest seismic every 10 minutes",
+  { minutes: 10 },
+  internal.ingest.ingestSeismic,
+  {},
+);
 crons.interval("ingest flights every 5 minutes", { minutes: 5 }, internal.ingest.ingestFlights, {});
 crons.interval(
   "ingest connectivity every 5 minutes",
@@ -12,6 +24,7 @@ crons.interval(
   internal.ingest.ingestConnectivity,
   {},
 );
+crons.interval("ingest power every 10 minutes", { minutes: 10 }, internal.ingest.ingestPower, {});
 
 if ((process.env.ENABLE_SOCIAL_INGESTION ?? "false") === "true") {
   crons.interval(
