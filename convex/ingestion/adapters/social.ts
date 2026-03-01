@@ -38,12 +38,65 @@ type RedditSearchResponse = {
   };
 };
 
+type PullPushResponse = {
+  data?: Array<{
+    id?: string;
+    title?: string;
+    selftext?: string;
+    permalink?: string;
+    subreddit?: string;
+    author?: string;
+    created_utc?: number;
+    score?: number;
+    num_comments?: number;
+    over_18?: boolean;
+    removed_by_category?: string | null;
+    subreddit_subscribers?: number;
+  }>;
+};
+
+type RedditPostRow = {
+  id?: string;
+  title?: string;
+  selftext?: string;
+  permalink?: string;
+  subreddit?: string;
+  author?: string;
+  createdUtc?: number;
+  score?: number;
+  comments?: number;
+  provider: "reddit" | "pullpush";
+  over18?: boolean;
+  removedByCategory?: string | null;
+  subredditSubscribers?: number;
+};
+
 const REDDIT_QUERIES = [
   "iran united states pentagon centcom strike missile drone retaliation",
   "iran iraq syria yemen lebanon red sea us military base attack",
 ];
 
 const SOCIAL_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const REDDIT_MAX_RESULTS = 70;
+const REDDIT_DEFAULT_HEADERS = {
+  "User-Agent":
+    process.env.REDDIT_USER_AGENT?.trim() ||
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+  Accept: "application/json",
+} as const;
+const PULLPUSH_PRIORITY_SUBREDDITS = new Set(
+  [
+    "worldnews",
+    "news",
+    "geopolitics",
+    "credibledefense",
+    "combatfootage",
+    "middleeast",
+    "iran",
+    "iranian",
+    "politics",
+  ].map((item) => item.toLowerCase()),
+);
 
 function withinSocialWindow(ts: number, now: number): boolean {
   if (!Number.isFinite(ts)) {
@@ -53,6 +106,139 @@ function withinSocialWindow(ts: number, now: number): boolean {
   return delta >= 0 && delta <= SOCIAL_MAX_AGE_MS;
 }
 
+function extractHttpStatus(error: unknown): number | null {
+  const message = (error as Error)?.message ?? "";
+  const match = message.match(/HTTP\s+(\d{3})\b/i);
+  if (!match?.[1]) {
+    return null;
+  }
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function shouldTryRedditMirrorFallback(error: unknown): boolean {
+  const status = extractHttpStatus(error);
+  return status === 403 || status === 429 || status === 401;
+}
+
+function parseRedditRowsFromOfficial(payload: RedditSearchResponse): RedditPostRow[] {
+  return (payload.data?.children ?? []).map((row) => {
+    const post = row.data;
+    return {
+      id: undefined,
+      title: post?.title,
+      selftext: post?.selftext,
+      permalink: post?.permalink,
+      subreddit: post?.subreddit,
+      author: post?.author,
+      createdUtc: post?.created_utc,
+      score: post?.score,
+      comments: post?.num_comments,
+      provider: "reddit",
+    };
+  });
+}
+
+function parseRedditRowsFromPullPush(payload: PullPushResponse): RedditPostRow[] {
+  return (payload.data ?? []).map((post) => ({
+    id: post.id,
+    title: post.title,
+    selftext: post.selftext,
+    permalink: post.permalink,
+    subreddit: post.subreddit,
+    author: post.author,
+    createdUtc: post.created_utc,
+    score: post.score,
+    comments: post.num_comments,
+    provider: "pullpush",
+    over18: post.over_18,
+    removedByCategory: post.removed_by_category,
+    subredditSubscribers: post.subreddit_subscribers,
+  }));
+}
+
+async function fetchRedditRowsOfficial(query: string): Promise<RedditPostRow[]> {
+  const endpoints = ["https://www.reddit.com/search.json", "https://old.reddit.com/search.json"];
+  let lastError: Error | null = null;
+
+  for (const endpoint of endpoints) {
+    try {
+      const url = new URL(endpoint);
+      url.searchParams.set("q", query);
+      url.searchParams.set("sort", "new");
+      url.searchParams.set("limit", String(REDDIT_MAX_RESULTS));
+      url.searchParams.set("t", "day");
+      url.searchParams.set("raw_json", "1");
+
+      const payload = await fetchJson<RedditSearchResponse>(url.toString(), {
+        headers: REDDIT_DEFAULT_HEADERS,
+      });
+      return parseRedditRowsFromOfficial(payload);
+    } catch (error) {
+      lastError = error as Error;
+      if (!shouldTryRedditMirrorFallback(error)) {
+        continue;
+      }
+    }
+  }
+
+  throw lastError ?? new Error("Reddit fetch failed for unknown reason.");
+}
+
+async function fetchRedditRowsPullPush(query: string): Promise<RedditPostRow[]> {
+  const url = new URL("https://api.pullpush.io/reddit/search/submission/");
+  url.searchParams.set("q", query);
+  url.searchParams.set("size", String(REDDIT_MAX_RESULTS));
+  url.searchParams.set("sort", "desc");
+  url.searchParams.set("sort_type", "created_utc");
+
+  const payload = await fetchJson<PullPushResponse>(url.toString(), {
+    headers: REDDIT_DEFAULT_HEADERS,
+  });
+  return parseRedditRowsFromPullPush(payload);
+}
+
+async function fetchRedditRowsWithFallback(query: string): Promise<{
+  rows: RedditPostRow[];
+  provider: "reddit" | "pullpush";
+  warning?: string;
+}> {
+  try {
+    const rows = await fetchRedditRowsOfficial(query);
+    return {
+      rows,
+      provider: "reddit",
+    };
+  } catch (error) {
+    if (!shouldTryRedditMirrorFallback(error)) {
+      throw error;
+    }
+
+    const fallbackRows = await fetchRedditRowsPullPush(query);
+    return {
+      rows: fallbackRows,
+      provider: "pullpush",
+      warning: `Reddit API blocked (${(error as Error).message}); using PullPush fallback.`,
+    };
+  }
+}
+
+function isAllowedPullPushSubreddit(
+  subredditRaw: string | undefined,
+  subscribersRaw: number | undefined,
+  minSubscribers: number,
+): boolean {
+  const subreddit = (subredditRaw ?? "").trim().toLowerCase();
+  if (!subreddit) {
+    return false;
+  }
+  if (PULLPUSH_PRIORITY_SUBREDDITS.has(subreddit)) {
+    return true;
+  }
+
+  const subscribers = Number(subscribersRaw ?? 0);
+  return Number.isFinite(subscribers) && subscribers >= minSubscribers;
+}
 
 async function fetchRedditItems(now: number): Promise<{
   items: NormalizedIngestItem[];
@@ -62,23 +248,14 @@ async function fetchRedditItems(now: number): Promise<{
   const items: NormalizedIngestItem[] = [];
   const minScore = Number(process.env.REDDIT_MIN_SCORE ?? 5);
   const minComments = Number(process.env.REDDIT_MIN_COMMENTS ?? 1);
+  const minPullPushSubscribersRaw = Number(process.env.REDDIT_PULLPUSH_MIN_SUBSCRIBERS ?? 75000);
+  const minPullPushSubscribers = Number.isFinite(minPullPushSubscribersRaw)
+    ? Math.max(0, Math.round(minPullPushSubscribersRaw))
+    : 75000;
+  let pullPushFallbackQueries = 0;
 
   const runs = await Promise.allSettled(
-    REDDIT_QUERIES.map(async (query) => {
-      const url = new URL("https://www.reddit.com/search.json");
-      url.searchParams.set("q", query);
-      url.searchParams.set("sort", "new");
-      url.searchParams.set("limit", "70");
-      url.searchParams.set("t", "day");
-
-      const payload = await fetchJson<RedditSearchResponse>(url.toString(), {
-        headers: {
-          "User-Agent": "conflict-tracker/2.0",
-        },
-      });
-
-      return payload.data?.children ?? [];
-    }),
+    REDDIT_QUERIES.map((query) => fetchRedditRowsWithFallback(query)),
   );
 
   for (const run of runs) {
@@ -87,8 +264,14 @@ async function fetchRedditItems(now: number): Promise<{
       continue;
     }
 
-    for (const row of run.value) {
-      const post = row.data;
+    if (run.value.warning) {
+      warnings.push(run.value.warning);
+    }
+    if (run.value.provider === "pullpush") {
+      pullPushFallbackQueries += 1;
+    }
+
+    for (const post of run.value.rows) {
       if (!post?.title) {
         continue;
       }
@@ -98,21 +281,43 @@ async function fetchRedditItems(now: number): Promise<{
         continue;
       }
 
+      if (post.provider === "pullpush") {
+        if (post.over18 || post.removedByCategory) {
+          continue;
+        }
+        if (
+          !isAllowedPullPushSubreddit(
+            post.subreddit,
+            post.subredditSubscribers,
+            minPullPushSubscribers,
+          )
+        ) {
+          continue;
+        }
+      }
+
       const score = Number(post.score ?? 0);
-      const comments = Number(post.num_comments ?? 0);
+      const comments = Number(post.comments ?? 0);
       if (score < minScore || comments < minComments) {
         continue;
       }
 
-      const publishedTs =
-        typeof post.created_utc === "number" ? Math.round(post.created_utc * 1000) : now;
+      const publishedTs = typeof post.createdUtc === "number" ? Math.round(post.createdUtc * 1000) : now;
       if (!withinSocialWindow(publishedTs, now)) {
         continue;
       }
 
       const place = derivePlace(summaryRaw);
       const category = detectCategoryFromText(summaryRaw) as EventCategory;
-      const postUrl = post.permalink ? `https://www.reddit.com${post.permalink}` : undefined;
+      const permalink =
+        post.permalink && post.permalink.startsWith("/")
+          ? `https://www.reddit.com${post.permalink}`
+          : post.permalink;
+      const postUrl =
+        permalink ??
+        (post.id && post.subreddit
+          ? `https://www.reddit.com/r/${post.subreddit}/comments/${post.id}/`
+          : undefined);
 
       if (!postUrl) {
         continue;
@@ -134,7 +339,7 @@ async function fetchRedditItems(now: number): Promise<{
         keywords: extractKeywords(summaryRaw),
         credibilityWeight: 0.3,
         rawJson: {
-          source: "reddit",
+          source: post.provider,
           subreddit: post.subreddit,
           author: post.author,
           score,
@@ -164,7 +369,13 @@ async function fetchRedditItems(now: number): Promise<{
 
   return {
     items: [...deduped.values()].slice(0, 120),
-    warnings,
+    warnings:
+      pullPushFallbackQueries > 0
+        ? [
+            ...warnings,
+            `Reddit fallback source used for ${pullPushFallbackQueries}/${REDDIT_QUERIES.length} queries due Reddit API blocking.`,
+          ]
+        : warnings,
   };
 }
 

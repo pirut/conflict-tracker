@@ -30,6 +30,7 @@ This version was reset around data quality:
   - NASA FIRMS hotspots (if `FIRMS_API_KEY` is set)
 - Social (optional, unverified):
   - Reddit (quality-gated)
+    - If Reddit API returns 403/429, app falls back to PullPush mirror and still applies quality gates
   - Custom social endpoint
   - X ingestion is intentionally disabled in this build
 
