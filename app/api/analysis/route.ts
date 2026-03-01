@@ -218,70 +218,91 @@ async function callOpenRouter(
   const referer = process.env.OPEN_ROUTER_REFERER?.trim() || "http://localhost:3000";
   const title = process.env.OPEN_ROUTER_APP_NAME?.trim() || "Conflict Tracker";
 
-  const body = {
-    model,
-    temperature: 0.15,
-    top_p: 0.9,
-    response_format: { type: "json_object" },
-    messages: [
-      {
-        role: "system",
-        content:
-          "You are an intelligence analyst for a live US-Iran conflict monitoring desk. Prioritize US-linked strikes, retaliatory actions, and direct military exchanges involving Iran. Be explicit about uncertainty. Return JSON only.",
-      },
-      {
-        role: "user",
-        content: [
-          `Language code for all output: ${language}.`,
-          "Treat social-only claims as unverified.",
-          "Prioritize high-confidence and recently updated events.",
-          "Return strictly this JSON shape: { headline, executiveSummary, keyDevelopments[2-6], assessedRisks[2-6], monitoringGaps[2-6], recommendedChecks[2-6], confidenceNote }.",
-          "Data snapshot:",
-          JSON.stringify(payload),
-        ].join("\n"),
-      },
-    ],
-  };
-
-  const response = await fetch(ROUTER_API_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-      "HTTP-Referer": referer,
-      "X-Title": title,
+  const messages = [
+    {
+      role: "system",
+      content:
+        "You are an intelligence analyst for a live US-Iran conflict monitoring desk. Prioritize US-linked strikes, retaliatory actions, and direct military exchanges involving Iran. Be explicit about uncertainty. Return JSON only.",
     },
-    body: JSON.stringify(body),
-  });
+    {
+      role: "user",
+      content: [
+        `Language code for all output: ${language}.`,
+        "Treat social-only claims as unverified.",
+        "Prioritize high-confidence and recently updated events.",
+        "Return strictly this JSON shape: { headline, executiveSummary, keyDevelopments[2-6], assessedRisks[2-6], monitoringGaps[2-6], recommendedChecks[2-6], confidenceNote }.",
+        "Data snapshot:",
+        JSON.stringify(payload),
+      ].join("\n"),
+    },
+  ];
 
-  if (!response.ok) {
-    const message = await response.text();
-    throw new OpenRouterError(
-      `OpenRouter HTTP ${response.status}: ${message.slice(0, 260)}`,
-      response.status,
-    );
-  }
+  const send = async (useResponseFormat: boolean) => {
+    const body: Record<string, unknown> = {
+      model,
+      temperature: 0.15,
+      top_p: 0.9,
+      messages,
+    };
+    if (useResponseFormat) {
+      body.response_format = { type: "json_object" };
+    }
 
-  const json = (await response.json()) as {
-    choices?: Array<{
-      message?: {
-        content?: string;
-      };
-    }>;
+    const response = await fetch(ROUTER_API_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": referer,
+        "X-Title": title,
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const message = await response.text();
+      throw new OpenRouterError(
+        `OpenRouter HTTP ${response.status}: ${message.slice(0, 260)}`,
+        response.status,
+      );
+    }
+
+    const json = (await response.json()) as {
+      choices?: Array<{
+        message?: {
+          content?: string;
+        };
+      }>;
+    };
+
+    const content = json.choices?.[0]?.message?.content?.trim();
+    if (!content) {
+      throw new Error("OpenRouter response did not include message content.");
+    }
+
+    const parsedObject = JSON.parse(extractJSONObject(content));
+    const analysis = analysisSchema.parse(parsedObject);
+
+    return {
+      analysis,
+      model,
+    };
   };
 
-  const content = json.choices?.[0]?.message?.content?.trim();
-  if (!content) {
-    throw new Error("OpenRouter response did not include message content.");
+  try {
+    return await send(true);
+  } catch (error) {
+    const message = (error as Error).message.toLowerCase();
+    const unsupportedResponseFormat =
+      message.includes("response_format is not supported") ||
+      message.includes("response format is not supported");
+
+    if (unsupportedResponseFormat) {
+      return await send(false);
+    }
+
+    throw error;
   }
-
-  const parsedObject = JSON.parse(extractJSONObject(content));
-  const analysis = analysisSchema.parse(parsedObject);
-
-  return {
-    analysis,
-    model,
-  };
 }
 
 function resolveOpenRouterModels(): string[] {

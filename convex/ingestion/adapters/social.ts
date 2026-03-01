@@ -118,14 +118,29 @@ function resolveXQuery(): string {
   return parts.join(" ");
 }
 
+function resolveXBearerCandidates(rawToken: string): string[] {
+  const candidates = [rawToken];
+  if (rawToken.includes("%")) {
+    try {
+      const decoded = decodeURIComponent(rawToken);
+      if (decoded && decoded !== rawToken) {
+        candidates.push(decoded);
+      }
+    } catch {
+      // keep original token only
+    }
+  }
+  return [...new Set(candidates)];
+}
+
 async function fetchXItems(now: number): Promise<{
   items: NormalizedIngestItem[];
   warnings: string[];
 }> {
   const warnings: string[] = [];
-  const token = process.env.X_API_BEARER_TOKEN?.trim();
+  const rawToken = process.env.X_API_BEARER_TOKEN?.trim();
 
-  if (!token) {
+  if (!rawToken) {
     return {
       items: [],
       warnings: ["X API token missing. Set X_API_BEARER_TOKEN to enable X ingestion."],
@@ -136,6 +151,11 @@ async function fetchXItems(now: number): Promise<{
   const maxResults = Number.isFinite(maxResultsRaw)
     ? Math.max(10, Math.min(100, Math.round(maxResultsRaw)))
     : 50;
+  const minFollowersRaw = Number(process.env.X_MIN_FOLLOWERS ?? 1200);
+  const minFollowers = Number.isFinite(minFollowersRaw) ? Math.max(0, Math.round(minFollowersRaw)) : 1200;
+  const minEngagementRaw = Number(process.env.X_MIN_ENGAGEMENT ?? 12);
+  const minEngagement = Number.isFinite(minEngagementRaw) ? Math.max(0, Math.round(minEngagementRaw)) : 12;
+  const allowLowQualityFallback = (process.env.X_ALLOW_LOW_QUALITY_FALLBACK ?? "true") === "true";
 
   const query = resolveXQuery();
   const baseUrl = (process.env.X_API_BASE_URL ?? "https://api.x.com").replace(/\/+$/, "");
@@ -146,13 +166,33 @@ async function fetchXItems(now: number): Promise<{
   url.searchParams.set("expansions", "author_id");
   url.searchParams.set("user.fields", "name,username,verified,public_metrics");
 
-  try {
-    const payload = await fetchJson<XRecentSearchResponse>(url.toString(), {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
+  const tokenCandidates = resolveXBearerCandidates(rawToken);
+  let payload: XRecentSearchResponse | null = null;
+  let lastError: Error | null = null;
 
+  for (const token of tokenCandidates) {
+    try {
+      payload = await fetchJson<XRecentSearchResponse>(url.toString(), {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      lastError = null;
+      break;
+    } catch (error) {
+      lastError = error as Error;
+    }
+  }
+
+  if (!payload) {
+    warnings.push(`X API fetch failed: ${lastError?.message ?? "unknown error"}`);
+    return {
+      items: [],
+      warnings,
+    };
+  }
+
+  try {
     const usersById = new Map<string, XUser>();
     for (const user of payload.includes?.users ?? []) {
       if (user.id) {
@@ -160,7 +200,8 @@ async function fetchXItems(now: number): Promise<{
       }
     }
 
-    const items: NormalizedIngestItem[] = [];
+    const strongItems: NormalizedIngestItem[] = [];
+    const weakItems: Array<{ item: NormalizedIngestItem; engagement: number }> = [];
 
     for (const post of payload.data ?? []) {
       const text = post.text?.trim();
@@ -194,15 +235,10 @@ async function fetchXItems(now: number): Promise<{
       const engagement = likes + reposts + replies;
       const verified = Boolean(author?.verified);
 
-      const passesQualityGate = verified || followers >= 5000 || engagement >= 60;
-      if (!passesQualityGate) {
-        continue;
-      }
-
       const place = derivePlace(text);
       const category = detectCategoryFromText(text) as EventCategory;
 
-      items.push({
+      const item: NormalizedIngestItem = {
         sourceType: "social",
         sourceName: `X/${profileLabel}`,
         url: postUrl,
@@ -240,11 +276,34 @@ async function fetchXItems(now: number): Promise<{
           "Social posts can contain rumors, stale media, or missing context.",
           "Independent corroboration is required before treating this as factual.",
         ],
-      });
+      };
+
+      const passesQualityGate = verified || followers >= minFollowers || engagement >= minEngagement;
+      if (passesQualityGate) {
+        strongItems.push(item);
+      } else {
+        weakItems.push({
+          item: {
+            ...item,
+            credibilityWeight: Math.max(0.2, item.credibilityWeight - 0.08),
+          },
+          engagement,
+        });
+      }
+    }
+
+    if (strongItems.length === 0 && weakItems.length > 0 && allowLowQualityFallback) {
+      warnings.push(
+        "X quality gate yielded 0 strong items; including limited low-engagement rows for visibility.",
+      );
+      weakItems
+        .sort((a, b) => b.engagement - a.engagement || b.item.publishedTs - a.item.publishedTs)
+        .slice(0, 20)
+        .forEach((row) => strongItems.push(row.item));
     }
 
     const deduped = new Map<string, NormalizedIngestItem>();
-    for (const item of items) {
+    for (const item of strongItems) {
       if (!deduped.has(item.url ?? `${item.sourceName}:${item.title}:${item.publishedTs}`)) {
         deduped.set(item.url ?? `${item.sourceName}:${item.title}:${item.publishedTs}`, item);
       }
