@@ -104,14 +104,17 @@ export function DashboardPage() {
     types: activeTypes as never,
   }) as DashboardEvent[] | undefined;
 
-  const signalsQuery = useQuery(api.events.getSignals, {
-    timeRangeHours: filters.timeRangeHours,
-  }) as SignalRecord[] | undefined;
+  const signalsQuery = useQuery(api.events.getSignals, {}) as SignalRecord[] | undefined;
 
   const stats = useQuery(api.events.getStats, {});
 
   const events = useMemo(() => eventsQuery ?? [], [eventsQuery]);
-  const signals = useMemo(() => signalsQuery ?? [], [signalsQuery]);
+  const signals = useMemo(() => {
+    const rows = signalsQuery ?? [];
+    const referenceTs = rows[0]?.createdAt ?? 0;
+    const since = referenceTs - filters.timeRangeHours * 60 * 60 * 1000;
+    return rows.filter((row) => row.createdAt >= since);
+  }, [signalsQuery, filters.timeRangeHours]);
 
   const fusion = useMemo(() => buildFusionSnapshot(events, signals), [events, signals]);
 
