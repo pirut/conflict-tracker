@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "convex/react";
 import {
   AlertTriangle,
@@ -29,7 +29,7 @@ const DEFAULT_FILTERS: MonitorFilters = {
   timeRangeHours: 24,
   minConfidence: 45,
   q: "",
-  includeSocial: false,
+  includeSocial: true,
 };
 
 const TIME_WINDOWS = [
@@ -97,20 +97,22 @@ function numberFromSignal(signal: SignalRecord | undefined, key: string): number
   return Number.isFinite(value) ? value : null;
 }
 
+function clip(text: string, maxChars = 260): string {
+  if (text.length <= maxChars) {
+    return text;
+  }
+  return `${text.slice(0, maxChars).trimEnd()}...`;
+}
+
 export function DashboardPage() {
   const [filters, setFilters] = useState<MonitorFilters>(DEFAULT_FILTERS);
-  const [tick, setTick] = useState(() => Date.now());
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
-
-  useEffect(() => {
-    const timer = setInterval(() => setTick(Date.now()), 60_000);
-    return () => clearInterval(timer);
-  }, []);
+  const [feedLimit, setFeedLimit] = useState<number>(30);
 
   const activeTypes = filters.includeSocial ? undefined : (["news", "signals"] as const);
 
   const eventsQuery = useQuery(api.events.getEvents, {
-    since: tick - filters.timeRangeHours * 60 * 60 * 1000,
+    timeRangeHours: filters.timeRangeHours,
     minConfidence: filters.minConfidence,
     q: filters.q.trim() || undefined,
     types: activeTypes as never,
@@ -163,6 +165,22 @@ export function DashboardPage() {
   );
 
   const dominantDomains = useMemo(() => topSourceDomains(prioritizedEvents), [prioritizedEvents]);
+  const socialCount = useMemo(
+    () => prioritizedEvents.filter((event) => event.sourceTypes.includes("social")).length,
+    [prioritizedEvents],
+  );
+  const directRecentCount = useMemo(
+    () => {
+      const referenceTs = prioritizedEvents[0]?.eventTs;
+      if (!referenceTs) {
+        return 0;
+      }
+      return prioritizedEvents.filter(
+        (event) => usIranSignalScore(event) >= 8 && referenceTs - event.eventTs <= 6 * 60 * 60 * 1000,
+      ).length;
+    },
+    [prioritizedEvents],
+  );
 
   const latestConnectivity = connectivitySignals[0];
   const latestFlight = flightSignals[0];
@@ -191,7 +209,7 @@ export function DashboardPage() {
 
           <div className="grid gap-2 text-xs text-[#4f4f63]">
             <p className="inline-flex items-center gap-2 rounded-lg border border-[#ddd8cb] bg-white px-3 py-2">
-              <RefreshCcw className="h-3.5 w-3.5" /> refreshed every minute
+              <RefreshCcw className="h-3.5 w-3.5" /> live Convex subscriptions
             </p>
             <p className="inline-flex items-center gap-2 rounded-lg border border-[#ddd8cb] bg-white px-3 py-2">
               <ShieldAlert className="h-3.5 w-3.5" /> strict trust filter active
@@ -281,23 +299,58 @@ export function DashboardPage() {
         </div>
       </section>
 
-      <section className="mt-4">
-        <AIAnalysisPanel
-          events={prioritizedEvents}
-          connectivitySignals={connectivitySignals}
-          flightSignals={flightSignals}
-          firmsSignals={firmsSignals}
-          language="en"
-        />
+      <section className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <article className="monitor-card p-4">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6f6f85]">Direct Signals (6h)</p>
+          <p className="mt-2 text-2xl font-semibold text-[#1a1b25]">{directRecentCount}</p>
+          <p className="mt-1 text-xs text-[#5a5a6f]">US-linked and Iran-linked strike clusters in the last six hours.</p>
+        </article>
+        <article className="monitor-card p-4">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6f6f85]">Social Footprint</p>
+          <p className="mt-2 text-2xl font-semibold text-[#1a1b25]">{socialCount}</p>
+          <p className="mt-1 text-xs text-[#5a5a6f]">Rows with social source type currently visible in this window.</p>
+        </article>
+        <article className="monitor-card p-4">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6f6f85]">Feed Density</p>
+          <p className="mt-2 text-2xl font-semibold text-[#1a1b25]">{feedLimit}</p>
+          <p className="mt-1 text-xs text-[#5a5a6f]">Priority rows rendered at once for quick scanning.</p>
+        </article>
       </section>
 
       <section className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
-        <div className="xl:col-span-7">
+        <div className="space-y-4 xl:col-span-7">
+          <AIAnalysisPanel
+            events={prioritizedEvents}
+            connectivitySignals={connectivitySignals}
+            flightSignals={flightSignals}
+            firmsSignals={firmsSignals}
+            language="en"
+          />
+
           <div className="monitor-card p-4 sm:p-5">
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-[#6f6f85]">Priority Feed</h2>
-              <p className="text-xs text-[#626277]">sorted by confidence, recency, and US-Iran signal strength</p>
+              <div className="flex items-center gap-2">
+                {[20, 30, 50].map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setFeedLimit(value)}
+                    className={`rounded-full border px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] transition ${
+                      feedLimit === value
+                        ? "border-[#1f202f] bg-[#1f202f] text-white"
+                        : "border-[#d7d1c3] bg-white text-[#4f4f64] hover:border-[#8a7a53]"
+                    }`}
+                  >
+                    {value}
+                  </button>
+                ))}
+              </div>
             </div>
+
+            <p className="mt-2 text-xs text-[#626277]">
+              Sorted by confidence, recency, and US-Iran signal strength. Select one row to expand evidence and focus it on the map.
+            </p>
 
             <div className="mt-3 space-y-3">
               {prioritizedEvents.length === 0 ? (
@@ -305,102 +358,124 @@ export function DashboardPage() {
                   No events matched current filters.
                 </p>
               ) : (
-                prioritizedEvents.slice(0, 40).map((event) => (
-                  <article key={event._id} className="rounded-xl border border-[#e7e2d7] bg-white p-3">
-                    <div className="flex flex-wrap items-start justify-between gap-2">
-                      <div>
-                        <h3 className="text-base font-semibold text-[#1c1d2a]">{event.title}</h3>
-                        <p className="mt-1 text-xs text-[#6a6a7f]">
-                          {event.placeName} • {event.category.replace(/_/g, " ")} • {formatAgo(event.eventTs)}
-                        </p>
+                prioritizedEvents.slice(0, feedLimit).map((event, index) => {
+                  const isSelected = selectedEvent?._id === event._id;
+                  return (
+                    <article
+                      key={event._id}
+                      className={`rounded-xl border p-3 transition ${
+                        isSelected
+                          ? "border-[#8d7645] bg-[#fffaf0] shadow-[0_6px_20px_rgba(95,78,41,0.13)]"
+                          : "border-[#e7e2d7] bg-white"
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div>
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#6e6e83]">
+                            #{index + 1} priority • {event.placeName}
+                          </p>
+                          <h3 className="mt-1 text-base font-semibold text-[#1c1d2a]">{event.title}</h3>
+                          <p className="mt-1 text-xs text-[#6a6a7f]">
+                            {event.category.replace(/_/g, " ")} • {formatAgo(event.eventTs)} • {event.sources.length} sources
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`rounded-full border px-2 py-1 text-[11px] font-semibold ${confidenceTone(event.confidenceLabel)}`}
+                          >
+                            {event.confidenceLabel} {Math.round(event.confidence)}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedEventId(event._id)}
+                            className={`rounded-full border px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] transition ${
+                              isSelected
+                                ? "border-[#7f6739] bg-[#7f6739] text-white"
+                                : "border-[#d7d1c3] bg-white text-[#4f4f64] hover:border-[#8a7a53]"
+                            }`}
+                          >
+                            {isSelected ? "Focused" : "Focus"}
+                          </button>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <span
-                          className={`rounded-full border px-2 py-1 text-[11px] font-semibold ${confidenceTone(event.confidenceLabel)}`}
-                        >
-                          {event.confidenceLabel} {Math.round(event.confidence)}
-                        </span>
-                        <span className="rounded-full border border-[#ddd7ca] bg-[#faf8f2] px-2 py-1 text-[11px] font-semibold text-[#5a4b2b]">
+
+                      <p className="mt-2 text-sm text-[#323347]">{clip(event.summary)}</p>
+
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {event.sourceTypes.map((type) => (
+                          <span
+                            key={type}
+                            className="rounded-full border border-[#d8d2c5] bg-[#f7f4ec] px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-[#655a45]"
+                          >
+                            {type}
+                          </span>
+                        ))}
+                        <span className="rounded-full border border-[#ddd7ca] bg-[#faf8f2] px-2 py-0.5 text-[11px] font-semibold text-[#5a4b2b]">
                           score {Math.round(priorityScore(event))}
                         </span>
                       </div>
-                    </div>
 
-                    <p className="mt-2 text-sm text-[#323347]">{event.summary}</p>
+                      {isSelected ? (
+                        <div className="mt-3 rounded-lg border border-[#ece7dc] bg-[#fcfaf5] p-3 text-sm text-[#333349]">
+                          {event.whatWeKnow.length > 0 ? (
+                            <div>
+                              <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[#6f6f85]">What We Know</p>
+                              <ul className="mt-1 space-y-1">
+                                {event.whatWeKnow.map((line) => (
+                                  <li key={line}>- {line}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : null}
 
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {event.sourceTypes.map((type) => (
-                        <span
-                          key={type}
-                          className="rounded-full border border-[#d8d2c5] bg-[#f7f4ec] px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-[#655a45]"
-                        >
-                          {type}
-                        </span>
-                      ))}
-                    </div>
+                          {event.whatWeDontKnow.length > 0 ? (
+                            <div className="mt-2">
+                              <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[#6f6f85]">
+                                What We Don&apos;t Know
+                              </p>
+                              <ul className="mt-1 space-y-1">
+                                {event.whatWeDontKnow.map((line) => (
+                                  <li key={line}>- {line}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : null}
 
-                    <details className="mt-2 rounded-lg border border-[#ece7dc] bg-[#fcfaf5] px-3 py-2">
-                      <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.12em] text-[#6f6f85]">
-                        Evidence and Source Links
-                      </summary>
-
-                      <div className="mt-2 space-y-2 text-sm text-[#333349]">
-                        {event.whatWeKnow.length > 0 ? (
-                          <div>
-                            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-[#6f6f85]">What We Know</p>
-                            <ul className="mt-1 space-y-1">
-                              {event.whatWeKnow.map((line) => (
-                                <li key={line}>- {line}</li>
-                              ))}
-                            </ul>
-                          </div>
-                        ) : null}
-
-                        {event.whatWeDontKnow.length > 0 ? (
-                          <div>
-                            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-[#6f6f85]">What We Don&apos;t Know</p>
-                            <ul className="mt-1 space-y-1">
-                              {event.whatWeDontKnow.map((line) => (
-                                <li key={line}>- {line}</li>
-                              ))}
-                            </ul>
-                          </div>
-                        ) : null}
-
-                        {event.sources.length > 0 ? (
-                          <div>
-                            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-[#6f6f85]">Sources</p>
-                            <ul className="mt-1 space-y-1">
-                              {event.sources.map((source) => (
-                                <li key={source._id} className="text-sm">
-                                  {source.url ? (
-                                    <a
-                                      href={source.url}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      className="text-[#2d4a89] underline decoration-[#98a8ca] underline-offset-2"
-                                    >
-                                      {source.sourceName}
-                                    </a>
-                                  ) : (
-                                    <span>{source.sourceName}</span>
-                                  )}{" "}
-                                  ({source.sourceType}, {formatAgo(source.publishedTs)})
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        ) : null}
-                      </div>
-                    </details>
-                  </article>
-                ))
+                          {event.sources.length > 0 ? (
+                            <div className="mt-2">
+                              <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[#6f6f85]">Sources</p>
+                              <ul className="mt-1 space-y-1">
+                                {event.sources.slice(0, 8).map((source) => (
+                                  <li key={source._id} className="text-sm">
+                                    {source.url ? (
+                                      <a
+                                        href={source.url}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="text-[#2d4a89] underline decoration-[#98a8ca] underline-offset-2"
+                                      >
+                                        {source.sourceName}
+                                      </a>
+                                    ) : (
+                                      <span>{source.sourceName}</span>
+                                    )}{" "}
+                                    ({source.sourceType}, {formatAgo(source.publishedTs)})
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </article>
+                  );
+                })
               )}
             </div>
           </div>
         </div>
 
-        <div className="xl:col-span-5 space-y-4">
+        <div className="space-y-4 xl:col-span-5 xl:sticky xl:top-4 xl:self-start">
           <MapPanel
             events={prioritizedEvents}
             selectedEvent={selectedEvent}

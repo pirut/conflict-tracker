@@ -23,6 +23,15 @@ type AIAnalysisPanelProps = {
   language?: string;
 };
 
+const DEFAULT_ANALYSIS_MIN_REFRESH_MINUTES = 35;
+const analysisRefreshMinutesRaw = Number(
+  process.env.NEXT_PUBLIC_ANALYSIS_MIN_REFRESH_MINUTES ?? DEFAULT_ANALYSIS_MIN_REFRESH_MINUTES,
+);
+const ANALYSIS_MIN_REFRESH_MINUTES = Number.isFinite(analysisRefreshMinutesRaw)
+  ? Math.max(5, Math.round(analysisRefreshMinutesRaw))
+  : DEFAULT_ANALYSIS_MIN_REFRESH_MINUTES;
+const ANALYSIS_MIN_REFRESH_MS = ANALYSIS_MIN_REFRESH_MINUTES * 60 * 1000;
+
 export function AIAnalysisPanel({
   events,
   connectivitySignals,
@@ -36,6 +45,7 @@ export function AIAnalysisPanel({
   const [model, setModel] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [manualRefreshPending, setManualRefreshPending] = useState(false);
 
   const payload = useMemo(() => {
     return {
@@ -89,6 +99,13 @@ export function AIAnalysisPanel({
       return;
     }
 
+    const hasRecentAnalysis =
+      generatedAt !== null && analysis !== null && Date.now() - generatedAt < ANALYSIS_MIN_REFRESH_MS;
+
+    if (!manualRefreshPending && hasRecentAnalysis) {
+      return;
+    }
+
     const controller = new AbortController();
     const timeout = setTimeout(async () => {
       setLoading(true);
@@ -132,6 +149,9 @@ export function AIAnalysisPanel({
         }
       } finally {
         setLoading(false);
+        if (manualRefreshPending) {
+          setManualRefreshPending(false);
+        }
       }
     }, 450);
 
@@ -139,7 +159,7 @@ export function AIAnalysisPanel({
       controller.abort();
       clearTimeout(timeout);
     };
-  }, [events.length, payloadKey]);
+  }, [events.length, payloadKey, generatedAt, analysis, manualRefreshPending]);
 
   return (
     <section className="monitor-card p-5">
@@ -148,6 +168,17 @@ export function AIAnalysisPanel({
           <Bot className="h-4 w-4" /> AI Executive Brief
         </div>
         <div className="flex flex-wrap items-center gap-2 text-[11px] text-[#6f6f85]">
+          <button
+            type="button"
+            onClick={() => setManualRefreshPending(true)}
+            disabled={loading || events.length === 0}
+            className="rounded-full border border-[#dcd5c8] bg-white px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#59596f] transition hover:border-[#9f8a59] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            refresh now
+          </button>
+          <span className="rounded-full border border-[#e4e0d5] px-2 py-1">
+            auto refresh {ANALYSIS_MIN_REFRESH_MINUTES}m
+          </span>
           {loading ? (
             <span className="inline-flex items-center gap-1.5 rounded-full border border-[#e4e0d5] px-2 py-1">
               <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> updating

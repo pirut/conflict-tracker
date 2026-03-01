@@ -30,8 +30,8 @@ This version was reset around data quality:
   - NASA FIRMS hotspots (if `FIRMS_API_KEY` is set)
 - Social (optional, unverified):
   - Reddit (quality-gated)
-  - X recent search (quality-gated)
   - Custom social endpoint
+  - X ingestion is intentionally disabled in this build
 
 ## Environment
 
@@ -48,10 +48,12 @@ cp .env.example .env.local
 ### AI Briefing (required for model summaries)
 
 - `OPEN_ROUTER_API`
-- `OPEN_ROUTER_MODEL` (default: `openai/gpt-4o-mini`)
+- `OPEN_ROUTER_MODEL` (default: `openai/gpt-oss-20b:free`)
 - `OPEN_ROUTER_MODEL_FALLBACKS` (optional comma-separated list for automatic retry on rate limits/outages)
+- `NEXT_PUBLIC_ANALYSIS_MIN_REFRESH_MINUTES` (default: `35`, client-side cooldown to avoid burning free-tier quota)
 
 If `OPEN_ROUTER_API` is missing or OpenRouter fails, the app falls back to deterministic local synthesis.
+If OpenRouter free-model daily quota is exhausted, the app enters fallback mode and surfaces the reset time when available.
 
 ## Run Locally
 

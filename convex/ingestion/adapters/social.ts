@@ -38,44 +38,6 @@ type RedditSearchResponse = {
   };
 };
 
-type XRecentSearchResponse = {
-  data?: Array<{
-    id?: string;
-    text?: string;
-    created_at?: string;
-    author_id?: string;
-    lang?: string;
-    public_metrics?: {
-      retweet_count?: number;
-      reply_count?: number;
-      like_count?: number;
-      quote_count?: number;
-      impression_count?: number;
-    };
-  }>;
-  includes?: {
-    users?: Array<{
-      id?: string;
-      username?: string;
-      name?: string;
-      verified?: boolean;
-      public_metrics?: {
-        followers_count?: number;
-      };
-    }>;
-  };
-};
-
-type XUser = {
-  id?: string;
-  username?: string;
-  name?: string;
-  verified?: boolean;
-  public_metrics?: {
-    followers_count?: number;
-  };
-};
-
 const REDDIT_QUERIES = [
   "iran united states pentagon centcom strike missile drone retaliation",
   "iran iraq syria yemen lebanon red sea us military base attack",
@@ -91,236 +53,6 @@ function withinSocialWindow(ts: number, now: number): boolean {
   return delta >= 0 && delta <= SOCIAL_MAX_AGE_MS;
 }
 
-function resolveXQuery(): string {
-  const fromEnv = process.env.X_API_QUERY?.trim();
-  if (fromEnv) {
-    return fromEnv;
-  }
-
-  const base = [
-    "(iran OR tehran OR isfahan OR natanz OR qom OR tabriz OR iraq OR syria OR yemen OR lebanon OR red sea OR hormuz)",
-    '("united states" OR "u.s." OR us OR pentagon OR centcom OR "us military" OR american)',
-    "(strike OR airstrike OR explosion OR attack OR missile OR drone OR retaliation OR bombardment OR military)",
-  ].join(" ");
-
-  const includeReplies = (process.env.X_API_INCLUDE_REPLIES ?? "false") === "true";
-  const lang = process.env.X_API_LANG?.trim().toLowerCase();
-  const parts = [base, "-is:retweet"];
-
-  if (!includeReplies) {
-    parts.push("-is:reply");
-  }
-
-  if (lang) {
-    parts.push(`lang:${lang}`);
-  }
-
-  return parts.join(" ");
-}
-
-function resolveXBearerCandidates(rawToken: string): string[] {
-  const candidates = [rawToken];
-  if (rawToken.includes("%")) {
-    try {
-      const decoded = decodeURIComponent(rawToken);
-      if (decoded && decoded !== rawToken) {
-        candidates.push(decoded);
-      }
-    } catch {
-      // keep original token only
-    }
-  }
-  return [...new Set(candidates)];
-}
-
-async function fetchXItems(now: number): Promise<{
-  items: NormalizedIngestItem[];
-  warnings: string[];
-}> {
-  const warnings: string[] = [];
-  const rawToken = process.env.X_API_BEARER_TOKEN?.trim();
-
-  if (!rawToken) {
-    return {
-      items: [],
-      warnings: ["X API token missing. Set X_API_BEARER_TOKEN to enable X ingestion."],
-    };
-  }
-
-  const maxResultsRaw = Number(process.env.X_API_MAX_RESULTS ?? 50);
-  const maxResults = Number.isFinite(maxResultsRaw)
-    ? Math.max(10, Math.min(100, Math.round(maxResultsRaw)))
-    : 50;
-  const minFollowersRaw = Number(process.env.X_MIN_FOLLOWERS ?? 1200);
-  const minFollowers = Number.isFinite(minFollowersRaw) ? Math.max(0, Math.round(minFollowersRaw)) : 1200;
-  const minEngagementRaw = Number(process.env.X_MIN_ENGAGEMENT ?? 12);
-  const minEngagement = Number.isFinite(minEngagementRaw) ? Math.max(0, Math.round(minEngagementRaw)) : 12;
-  const allowLowQualityFallback = (process.env.X_ALLOW_LOW_QUALITY_FALLBACK ?? "true") === "true";
-
-  const query = resolveXQuery();
-  const baseUrl = (process.env.X_API_BASE_URL ?? "https://api.x.com").replace(/\/+$/, "");
-  const url = new URL(`${baseUrl}/2/tweets/search/recent`);
-  url.searchParams.set("query", query);
-  url.searchParams.set("max_results", String(maxResults));
-  url.searchParams.set("tweet.fields", "created_at,lang,author_id,public_metrics");
-  url.searchParams.set("expansions", "author_id");
-  url.searchParams.set("user.fields", "name,username,verified,public_metrics");
-
-  const tokenCandidates = resolveXBearerCandidates(rawToken);
-  let payload: XRecentSearchResponse | null = null;
-  let lastError: Error | null = null;
-
-  for (const token of tokenCandidates) {
-    try {
-      payload = await fetchJson<XRecentSearchResponse>(url.toString(), {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-      lastError = null;
-      break;
-    } catch (error) {
-      lastError = error as Error;
-    }
-  }
-
-  if (!payload) {
-    warnings.push(`X API fetch failed: ${lastError?.message ?? "unknown error"}`);
-    return {
-      items: [],
-      warnings,
-    };
-  }
-
-  try {
-    const usersById = new Map<string, XUser>();
-    for (const user of payload.includes?.users ?? []) {
-      if (user.id) {
-        usersById.set(user.id, user);
-      }
-    }
-
-    const strongItems: NormalizedIngestItem[] = [];
-    const weakItems: Array<{ item: NormalizedIngestItem; engagement: number }> = [];
-
-    for (const post of payload.data ?? []) {
-      const text = post.text?.trim();
-      const postId = post.id?.trim();
-      if (!text || !postId) {
-        continue;
-      }
-
-      if (!isRelevantIranConflictNews(text, text)) {
-        continue;
-      }
-
-      const author = post.author_id ? usersById.get(post.author_id) : undefined;
-      const username = author?.username?.trim();
-      const name = author?.name?.trim();
-      const profileLabel = username ? `@${username}` : name || "unknown";
-      const postUrl = username
-        ? `https://x.com/${username}/status/${postId}`
-        : `https://x.com/i/status/${postId}`;
-
-      const metrics = post.public_metrics ?? {};
-      const publishedTs = parseTimestamp(post.created_at, now);
-      if (!withinSocialWindow(publishedTs, now)) {
-        continue;
-      }
-
-      const followers = Number(author?.public_metrics?.followers_count ?? 0);
-      const likes = Number(metrics.like_count ?? 0);
-      const reposts = Number(metrics.retweet_count ?? 0);
-      const replies = Number(metrics.reply_count ?? 0);
-      const engagement = likes + reposts + replies;
-      const verified = Boolean(author?.verified);
-
-      const place = derivePlace(text);
-      const category = detectCategoryFromText(text) as EventCategory;
-
-      const item: NormalizedIngestItem = {
-        sourceType: "social",
-        sourceName: `X/${profileLabel}`,
-        url: postUrl,
-        publishedTs,
-        fetchedTs: now,
-        title: `UNVERIFIED X signal: ${text.slice(0, 90)}`,
-        summary: text,
-        category,
-        lat: place.lat,
-        lon: place.lon,
-        placeName: place.placeName,
-        country: place.country,
-        keywords: extractKeywords(text),
-        credibilityWeight: Math.min(0.42, 0.24 + (verified ? 0.08 : 0) + (followers > 20000 ? 0.08 : 0)),
-        rawJson: {
-          source: "x",
-          id: postId,
-          lang: post.lang,
-          metrics,
-          author: {
-            id: author?.id,
-            username,
-            name,
-            verified,
-            followers,
-          },
-        },
-        isGeoPrecise: place.isGeoPrecise,
-        whatWeKnow: [
-          "An unverified X post references a possible development.",
-          `Engagement snapshot: ${likes} likes, ${reposts} reposts, ${replies} replies.`,
-          verified ? "Author account is verified." : "Author account is not verified.",
-        ],
-        whatWeDontKnow: [
-          "Social posts can contain rumors, stale media, or missing context.",
-          "Independent corroboration is required before treating this as factual.",
-        ],
-      };
-
-      const passesQualityGate = verified || followers >= minFollowers || engagement >= minEngagement;
-      if (passesQualityGate) {
-        strongItems.push(item);
-      } else {
-        weakItems.push({
-          item: {
-            ...item,
-            credibilityWeight: Math.max(0.2, item.credibilityWeight - 0.08),
-          },
-          engagement,
-        });
-      }
-    }
-
-    if (strongItems.length === 0 && weakItems.length > 0 && allowLowQualityFallback) {
-      warnings.push(
-        "X quality gate yielded 0 strong items; including limited low-engagement rows for visibility.",
-      );
-      weakItems
-        .sort((a, b) => b.engagement - a.engagement || b.item.publishedTs - a.item.publishedTs)
-        .slice(0, 20)
-        .forEach((row) => strongItems.push(row.item));
-    }
-
-    const deduped = new Map<string, NormalizedIngestItem>();
-    for (const item of strongItems) {
-      if (!deduped.has(item.url ?? `${item.sourceName}:${item.title}:${item.publishedTs}`)) {
-        deduped.set(item.url ?? `${item.sourceName}:${item.title}:${item.publishedTs}`, item);
-      }
-    }
-
-    return {
-      items: [...deduped.values()].slice(0, 120),
-      warnings,
-    };
-  } catch (error) {
-    warnings.push(`X API fetch failed: ${(error as Error).message}`);
-    return {
-      items: [],
-      warnings,
-    };
-  }
-}
 
 async function fetchRedditItems(now: number): Promise<{
   items: NormalizedIngestItem[];
@@ -328,8 +60,8 @@ async function fetchRedditItems(now: number): Promise<{
 }> {
   const warnings: string[] = [];
   const items: NormalizedIngestItem[] = [];
-  const minScore = Number(process.env.REDDIT_MIN_SCORE ?? 40);
-  const minComments = Number(process.env.REDDIT_MIN_COMMENTS ?? 12);
+  const minScore = Number(process.env.REDDIT_MIN_SCORE ?? 5);
+  const minComments = Number(process.env.REDDIT_MIN_COMMENTS ?? 1);
 
   const runs = await Promise.allSettled(
     REDDIT_QUERIES.map(async (query) => {
@@ -525,11 +257,8 @@ export async function fetchSocialReports(
     warnings.push(...reddit.warnings);
   }
 
-  const useX = (process.env.SOCIAL_X_ENABLED ?? "false") === "true";
-  if (useX) {
-    const x = await fetchXItems(now);
-    items.push(...x.items);
-    warnings.push(...x.warnings);
+  if ((process.env.SOCIAL_X_ENABLED ?? "false") === "true") {
+    warnings.push("X ingestion is disabled in this build. Use Reddit/custom social feed instead.");
   }
 
   const deduped = new Map<string, NormalizedIngestItem>();

@@ -40,6 +40,12 @@ type AnalysisRequest = {
 
 const MAX_EVENTS = 35;
 const MAX_SIGNAL_ROWS = 40;
+const DEFAULT_OPEN_ROUTER_MODEL = "openai/gpt-oss-20b:free";
+const DEFAULT_OPEN_ROUTER_FALLBACKS = [
+  "meta-llama/llama-3.3-70b-instruct:free",
+  "mistralai/mistral-small-3.1-24b-instruct:free",
+];
+const FREE_MODEL_RETRY_COOLDOWN_MS = 30 * 60 * 1000;
 
 const analysisSchema = z.object({
   headline: z.string(),
@@ -54,6 +60,7 @@ const analysisSchema = z.object({
 type AnalysisShape = z.infer<typeof analysisSchema>;
 
 const ROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
+let freeModelQuotaResetAt = 0;
 
 class OpenRouterError extends Error {
   status?: number;
@@ -262,7 +269,7 @@ async function callOpenRouter(
     if (!response.ok) {
       const message = await response.text();
       throw new OpenRouterError(
-        `OpenRouter HTTP ${response.status}: ${message.slice(0, 260)}`,
+        `OpenRouter HTTP ${response.status}: ${message.slice(0, 1200)}`,
         response.status,
       );
     }
@@ -306,18 +313,26 @@ async function callOpenRouter(
 }
 
 function resolveOpenRouterModels(): string[] {
-  const primary = process.env.OPEN_ROUTER_MODEL?.trim() || "openai/gpt-4o-mini";
-  const fallbackRaw = process.env.OPEN_ROUTER_MODEL_FALLBACKS ?? "";
+  const primary = process.env.OPEN_ROUTER_MODEL?.trim() || DEFAULT_OPEN_ROUTER_MODEL;
+  const fallbackRaw = process.env.OPEN_ROUTER_MODEL_FALLBACKS?.trim();
+  const fallbackModels =
+    fallbackRaw && fallbackRaw.length > 0
+      ? fallbackRaw
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean)
+      : DEFAULT_OPEN_ROUTER_FALLBACKS;
 
   const models = [
     primary,
-    ...fallbackRaw
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean),
+    ...fallbackModels,
   ];
 
   return [...new Set(models)];
+}
+
+function isFreeModel(model: string): boolean {
+  return /:free$/i.test(model.trim());
 }
 
 function shouldTryNextModel(error: unknown): boolean {
@@ -348,6 +363,31 @@ function shouldTryNextModel(error: unknown): boolean {
   );
 }
 
+function isFreeModelsDailyLimit(error: unknown): boolean {
+  if (!(error instanceof OpenRouterError)) {
+    return false;
+  }
+  const message = error.message.toLowerCase();
+  return (
+    error.status === 429 &&
+    (message.includes("free-models-per-day") ||
+      message.includes("rate limit exceeded: free-models-per-day"))
+  );
+}
+
+function extractRateLimitResetTimestamp(text: string): number | null {
+  const match = text.match(/x-ratelimit-reset"?\s*:\s*"?(\d{10,13})"?/i);
+  if (!match?.[1]) {
+    return null;
+  }
+  const raw = Number(match[1]);
+  if (!Number.isFinite(raw)) {
+    return null;
+  }
+  const ms = raw < 10_000_000_000 ? raw * 1000 : raw;
+  return ms;
+}
+
 export async function POST(request: NextRequest) {
   const body = (await request.json()) as AnalysisRequest;
   const targetLang = normalizeLang(body.language);
@@ -362,9 +402,24 @@ export async function POST(request: NextRequest) {
   }
 
   const models = resolveOpenRouterModels();
-  const errors: string[] = [];
+  const now = Date.now();
+  const freeModelsBlocked = freeModelQuotaResetAt > now;
+  const runnableModels = freeModelsBlocked ? models.filter((model) => !isFreeModel(model)) : models;
 
-  for (const model of models) {
+  if (runnableModels.length === 0) {
+    const until = new Date(freeModelQuotaResetAt).toISOString();
+    return NextResponse.json({
+      analysis: fallbackAnalysis(payload),
+      generatedAt: Date.now(),
+      mode: "fallback",
+      error: `OpenRouter free-model daily quota exhausted until ${until}.`,
+    });
+  }
+
+  const errors: string[] = [];
+  let freeQuotaResetAt: number | null = null;
+
+  for (const model of runnableModels) {
     try {
       const result = await callOpenRouter(payload, targetLang, model);
 
@@ -376,16 +431,32 @@ export async function POST(request: NextRequest) {
       });
     } catch (error) {
       errors.push(`${model}: ${(error as Error).message}`);
+      if (isFreeModelsDailyLimit(error)) {
+        freeQuotaResetAt = extractRateLimitResetTimestamp((error as Error).message);
+        freeModelQuotaResetAt = Math.max(
+          freeModelQuotaResetAt,
+          freeQuotaResetAt ?? Date.now() + FREE_MODEL_RETRY_COOLDOWN_MS,
+        );
+        break;
+      }
       if (!shouldTryNextModel(error)) {
         break;
       }
     }
   }
 
+  const quotaMessage = freeQuotaResetAt
+    ? `OpenRouter free-model daily quota exhausted until ${new Date(freeQuotaResetAt).toISOString()}.`
+    : freeModelQuotaResetAt > Date.now()
+      ? `OpenRouter free-model daily quota exhausted until ${new Date(freeModelQuotaResetAt).toISOString()}.`
+      : "OpenRouter free-model daily quota exhausted.";
+
   return NextResponse.json({
     analysis: fallbackAnalysis(payload),
     generatedAt: Date.now(),
     mode: "fallback",
-    error: errors.join(" | ").slice(0, 1200),
+    error: errors.some((message) => message.toLowerCase().includes("free-models-per-day"))
+      ? quotaMessage
+      : errors.join(" | ").slice(0, 1200),
   });
 }
