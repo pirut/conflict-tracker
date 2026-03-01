@@ -2,7 +2,9 @@
 
 import "leaflet/dist/leaflet.css";
 
-import { CircleMarker, MapContainer, TileLayer, Tooltip } from "react-leaflet";
+import { latLngBounds } from "leaflet";
+import { useEffect, useMemo } from "react";
+import { CircleMarker, MapContainer, TileLayer, Tooltip, useMap } from "react-leaflet";
 import { DashboardEvent } from "@/lib/types";
 import { clusterEvents } from "@/lib/map-clusters";
 
@@ -23,8 +25,45 @@ function markerColor(confidence: number): string {
   return "#ef4444";
 }
 
+function MapViewportController({
+  points,
+}: {
+  points: Array<{ lat: number; lon: number }>;
+}) {
+  const map = useMap();
+
+  useEffect(() => {
+    map.invalidateSize();
+
+    if (points.length === 0) {
+      map.setView([26.0, 36.0], 3);
+      return;
+    }
+
+    const bounds = latLngBounds(points.map((point) => [point.lat, point.lon] as [number, number]));
+    map.fitBounds(bounds, {
+      padding: [30, 30],
+      maxZoom: 7,
+      animate: false,
+    });
+  }, [map, points]);
+
+  return null;
+}
+
 export function MapCanvas({ events, onSelect, selectedEventId, translateText }: MapCanvasProps) {
-  const clusters = clusterEvents(events);
+  const mappableEvents = useMemo(
+    () =>
+      events.filter(
+        (event) =>
+          Number.isFinite(event.lat) &&
+          Number.isFinite(event.lon) &&
+          Math.abs(event.lat) <= 90 &&
+          Math.abs(event.lon) <= 180,
+      ),
+    [events],
+  );
+  const clusters = useMemo(() => clusterEvents(mappableEvents), [mappableEvents]);
 
   return (
     <MapContainer
@@ -35,6 +74,7 @@ export function MapCanvas({ events, onSelect, selectedEventId, translateText }: 
       style={{ height: "100%", width: "100%" }}
       scrollWheelZoom
     >
+      <MapViewportController points={clusters.map((cluster) => ({ lat: cluster.lat, lon: cluster.lon }))} />
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"

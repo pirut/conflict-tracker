@@ -21,6 +21,7 @@ type AIAnalysisPanelProps = {
   flightSignals: SignalRecord[];
   firmsSignals: SignalRecord[];
   language?: string;
+  className?: string;
 };
 
 const DEFAULT_ANALYSIS_MIN_REFRESH_MINUTES = 35;
@@ -38,6 +39,7 @@ export function AIAnalysisPanel({
   flightSignals,
   firmsSignals,
   language = "en",
+  className,
 }: AIAnalysisPanelProps) {
   const [analysis, setAnalysis] = useState<AnalysisShape | null>(null);
   const [generatedAt, setGeneratedAt] = useState<number | null>(null);
@@ -162,7 +164,7 @@ export function AIAnalysisPanel({
   }, [events.length, payloadKey, generatedAt, analysis, manualRefreshPending]);
 
   return (
-    <section className="monitor-card p-5">
+    <section className={`monitor-card flex h-full min-h-0 flex-col p-5 ${className ?? ""}`}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-[#6f6f85]">
           <Bot className="h-4 w-4" /> AI Executive Brief
@@ -196,65 +198,67 @@ export function AIAnalysisPanel({
         </div>
       </div>
 
-      {error ? (
-        <p className="mt-3 inline-flex items-start gap-2 rounded-lg border border-[#f1c8b5] bg-[#fff2ea] px-3 py-2 text-xs text-[#8a4123]">
-          <AlertTriangle className="mt-0.5 h-3.5 w-3.5" />
-          {error}
-        </p>
-      ) : null}
-
-      {!analysis ? (
-        <p className="mt-4 text-sm text-[#57576d]">
-          {loading ? "Generating conflict brief..." : "AI brief appears after events are loaded."}
-        </p>
-      ) : (
-        <>
-          <h2 className="mt-4 text-lg font-semibold text-[#1a1b25]">{analysis.headline}</h2>
-          <p className="mt-2 text-sm text-[#34344a]">{analysis.executiveSummary}</p>
-
-          <div className="mt-4 grid gap-3 md:grid-cols-2">
-            <article className="rounded-xl border border-[#ece7dc] bg-[#fcfaf5] p-3">
-              <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-[#6f6f85]">Key Developments</h3>
-              <ul className="mt-2 space-y-1.5 text-sm text-[#2a2a3a]">
-                {analysis.keyDevelopments.map((row) => (
-                  <li key={row}>- {row}</li>
-                ))}
-              </ul>
-            </article>
-
-            <article className="rounded-xl border border-[#ece7dc] bg-[#fcfaf5] p-3">
-              <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-[#6f6f85]">Assessed Risks</h3>
-              <ul className="mt-2 space-y-1.5 text-sm text-[#2a2a3a]">
-                {analysis.assessedRisks.map((row) => (
-                  <li key={row}>- {row}</li>
-                ))}
-              </ul>
-            </article>
-
-            <article className="rounded-xl border border-[#ece7dc] bg-[#fcfaf5] p-3">
-              <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-[#6f6f85]">Monitoring Gaps</h3>
-              <ul className="mt-2 space-y-1.5 text-sm text-[#2a2a3a]">
-                {analysis.monitoringGaps.map((row) => (
-                  <li key={row}>- {row}</li>
-                ))}
-              </ul>
-            </article>
-
-            <article className="rounded-xl border border-[#ece7dc] bg-[#fcfaf5] p-3">
-              <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-[#6f6f85]">Recommended Checks</h3>
-              <ul className="mt-2 space-y-1.5 text-sm text-[#2a2a3a]">
-                {analysis.recommendedChecks.map((row) => (
-                  <li key={row}>- {row}</li>
-                ))}
-              </ul>
-            </article>
-          </div>
-
-          <p className="mt-4 rounded-lg border border-[#ece7dc] bg-white px-3 py-2 text-xs text-[#57576d]">
-            {analysis.confidenceNote}
+      <div className="mt-3 min-h-0 flex-1 overflow-y-auto pr-1">
+        {error ? (
+          <p className="inline-flex items-start gap-2 rounded-lg border border-[#f1c8b5] bg-[#fff2ea] px-3 py-2 text-xs text-[#8a4123]">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5" />
+            {error}
           </p>
-        </>
-      )}
+        ) : null}
+
+        {!analysis ? (
+          <p className="mt-1 text-sm text-[#57576d]">
+            {loading ? "Generating conflict brief..." : "AI brief appears after events are loaded."}
+          </p>
+        ) : (
+          <>
+            <h2 className="mt-1 text-lg font-semibold text-[#1a1b25]">{analysis.headline}</h2>
+            <p className="mt-2 text-sm text-[#34344a]">{analysis.executiveSummary}</p>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <article className="rounded-xl border border-[#ece7dc] bg-[#fcfaf5] p-3">
+                <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-[#6f6f85]">Key Developments</h3>
+                <ul className="mt-2 space-y-1.5 text-sm text-[#2a2a3a]">
+                  {analysis.keyDevelopments.map((row) => (
+                    <li key={row}>- {row}</li>
+                  ))}
+                </ul>
+              </article>
+
+              <article className="rounded-xl border border-[#ece7dc] bg-[#fcfaf5] p-3">
+                <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-[#6f6f85]">Assessed Risks</h3>
+                <ul className="mt-2 space-y-1.5 text-sm text-[#2a2a3a]">
+                  {analysis.assessedRisks.map((row) => (
+                    <li key={row}>- {row}</li>
+                  ))}
+                </ul>
+              </article>
+
+              <article className="rounded-xl border border-[#ece7dc] bg-[#fcfaf5] p-3">
+                <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-[#6f6f85]">Monitoring Gaps</h3>
+                <ul className="mt-2 space-y-1.5 text-sm text-[#2a2a3a]">
+                  {analysis.monitoringGaps.map((row) => (
+                    <li key={row}>- {row}</li>
+                  ))}
+                </ul>
+              </article>
+
+              <article className="rounded-xl border border-[#ece7dc] bg-[#fcfaf5] p-3">
+                <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-[#6f6f85]">Recommended Checks</h3>
+                <ul className="mt-2 space-y-1.5 text-sm text-[#2a2a3a]">
+                  {analysis.recommendedChecks.map((row) => (
+                    <li key={row}>- {row}</li>
+                  ))}
+                </ul>
+              </article>
+            </div>
+
+            <p className="mt-4 rounded-lg border border-[#ece7dc] bg-white px-3 py-2 text-xs text-[#57576d]">
+              {analysis.confidenceNote}
+            </p>
+          </>
+        )}
+      </div>
     </section>
   );
 }

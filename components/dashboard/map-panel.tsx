@@ -29,6 +29,7 @@ type MapPanelProps = {
     whatWeDontKnow: string;
     sourceLinks: string;
   };
+  className?: string;
 };
 
 export function MapPanel({
@@ -38,9 +39,12 @@ export function MapPanel({
   onCloseDrawer,
   translateText,
   labels,
+  className,
 }: MapPanelProps) {
   return (
-    <section className="relative h-full min-h-[32rem] overflow-hidden rounded-lg border border-slate-200 bg-white">
+    <section
+      className={`relative h-full min-h-[16rem] overflow-hidden rounded-lg border border-slate-200 bg-white ${className ?? ""}`}
+    >
       <div className="absolute left-3 top-3 z-[900] rounded-md border border-slate-300 bg-white px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-700">
         {labels.confidenceMap}
       </div>
@@ -50,6 +54,13 @@ export function MapPanel({
         onSelect={onSelectEvent}
         translateText={translateText}
       />
+      {events.length === 0 ? (
+        <div className="pointer-events-none absolute inset-0 z-[850] flex items-center justify-center bg-white/65">
+          <p className="rounded-md border border-[#d9d2c5] bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-[#6d6d83]">
+            No geolocated events for current filters
+          </p>
+        </div>
+      ) : null}
       <EventDrawer
         event={selectedEvent}
         onClose={onCloseDrawer}
