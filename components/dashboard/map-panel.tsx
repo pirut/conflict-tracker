@@ -47,7 +47,7 @@ export function MapPanel({
 }: MapPanelProps) {
   return (
     <section
-      className={`relative h-full min-h-[16rem] overflow-hidden rounded-2xl border border-[#d7d2c4] bg-white ${className ?? ""}`}
+      className={`relative w-full min-h-[16rem] overflow-hidden rounded-2xl border border-[#d7d2c4] bg-white ${className ?? ""}`}
     >
       <div className="absolute left-3 top-3 z-[900] rounded-md border border-[#d7d2c4] bg-white/95 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#3c4158]">
         Multi-source conflict map

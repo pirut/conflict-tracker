@@ -70,10 +70,10 @@ function magnitudeBand(mag: number): string {
 }
 
 function buildQueryUrl(now: number): string {
-  const windowHoursRaw = Number(process.env.SEISMIC_WINDOW_HOURS ?? 36);
+  const windowHoursRaw = Number(process.env.SEISMIC_WINDOW_HOURS ?? 72);
   const windowHours = Number.isFinite(windowHoursRaw)
-    ? Math.max(6, Math.min(72, Math.round(windowHoursRaw)))
-    : 36;
+    ? Math.max(6, Math.min(168, Math.round(windowHoursRaw)))
+    : 72;
   const minMagnitudeRaw = Number(process.env.SEISMIC_MIN_MAGNITUDE ?? 2.8);
   const minMagnitude = Number.isFinite(minMagnitudeRaw)
     ? Math.max(1, Math.min(7, minMagnitudeRaw))
@@ -176,7 +176,7 @@ export async function fetchSeismicSignals(
     }
 
     if (items.length === 0) {
-      warnings.push("USGS returned no accepted seismic rows for the configured window.");
+      warnings.push("USGS returned zero earthquakes for the configured region/time window.");
     }
 
     return {
